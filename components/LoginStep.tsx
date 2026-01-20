@@ -42,7 +42,12 @@ const LoginStep: React.FC<LoginStepProps> = ({ onLoginSuccess }) => {
   // Phase 2: Avatar Selection/Generation
   const handleGenerateAIAvatar = async () => {
     setIsGenerating(true);
-    const aiAvatar = await generateAvatar(selectedStyle);
+    setError('');
+    let aiAvatar = await generateAvatar(selectedStyle, true);
+    if (!aiAvatar) {
+        // Fallback to cached avatar if fresh generation failed
+        aiAvatar = await generateAvatar(selectedStyle, false);
+    }
     if (aiAvatar) {
         setAvatar(aiAvatar);
     } else {
@@ -145,6 +150,9 @@ const LoginStep: React.FC<LoginStepProps> = ({ onLoginSuccess }) => {
                          <div className="relative w-24 h-24 mx-auto mt-2 rounded-full border-4 border-primary shadow-lg overflow-hidden">
                             <img src={avatar} className="w-full h-full object-cover" />
                          </div>
+                    )}
+                    {error && (
+                        <p className="text-red-500 text-xs text-center mt-2">{error}</p>
                     )}
                 </div>
             )}
