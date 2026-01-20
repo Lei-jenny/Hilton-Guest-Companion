@@ -1,596 +1,528 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { UserSession, Attraction } from '../types';
-import { MOCK_ATTRACTIONS } from '../services/mockService';
-import { generateConciergeInfo, chatWithConcierge, generateItinerary, generateAttractionImage, generateDynamicAttractions, getAttractionPlaceholder } from '../services/geminiService';
-import ReactMarkdown from 'react-markdown';
+import { TravelStyle, Booking, Attraction } from "../types";
 
-interface DashboardStepProps {
-  session: UserSession;
-}
+let apiKey = process.env.API_KEY || '';
 
-const DashboardStep: React.FC<DashboardStepProps> = ({ session }) => {
-  const [selectedAttraction, setSelectedAttraction] = useState<Attraction | null>(null);
-  
-  // Dynamic Attractions State
-  const [attractions, setAttractions] = useState<Attraction[]>([]);
-  const [loadingAttractions, setLoadingAttractions] = useState(true);
-
-  // AI Content State
-  const [aiContent, setAiContent] = useState<string>('');
-  const [loadingAi, setLoadingAi] = useState(false);
-  // Cache for insights: { attractionName: content }
-  const [insightCache, setInsightCache] = useState<Record<string, string>>({});
-  
-  // Image Generation State
-  const [generatedImages, setGeneratedImages] = useState<Record<number, string>>({});
-  
-  // Itinerary State
-  const [itinerary, setItinerary] = useState<string>('');
-  const [loadingItinerary, setLoadingItinerary] = useState(false);
-
-  // Map State
-  const [mapUrl, setMapUrl] = useState('');
-  const [mapKey, setMapKey] = useState(0); // Force iframe refresh
-
-  // Direction State
-  const [directionStep, setDirectionStep] = useState<'initial' | 'calculating' | 'ready'>('initial');
-  const [calculatedTime, setCalculatedTime] = useState('');
-
-  // Chat State
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatMessage, setChatMessage] = useState('');
-  const [chatHistory, setChatHistory] = useState<{role: string, text: string}[]>([]);
-  const [isChatLoading, setIsChatLoading] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
-  // Extract City name for dynamic header (simple split by comma)
-  const city = session.booking.location.split(',')[0];
-
-  // Derived lists
-  const nearbyAttractions = attractions.filter(a => a.category === 'Nearby').slice(0, 2);
-  const popularAttractions = attractions.filter(a => a.category === 'Must-See').slice(0, 2);
-
-  useEffect(() => {
-    // 1. Initial Map Setup (Centered on Hotel)
-    const baseMap = `https://maps.google.com/maps?q=${encodeURIComponent(session.booking.hotelName + " " + session.booking.location)}&t=&z=14&ie=UTF8&iwloc=&output=embed`;
-    setMapUrl(baseMap);
-
-    // 2. Load Attractions (Mock or Dynamic)
-    const loadAttractions = async () => {
-        setLoadingAttractions(true);
-        const existing = MOCK_ATTRACTIONS[session.booking.orderId];
-        
-        if (existing) {
-            setAttractions(existing);
-        } else {
-            // Fetch dynamically
-            const dynamicList = await generateDynamicAttractions(session.booking.location, session.travelStyle);
-            setAttractions(dynamicList);
-        }
-        setLoadingAttractions(false);
-    };
-    loadAttractions();
-
-    // 3. Generate Itinerary
-    const fetchItinerary = async () => {
-        setLoadingItinerary(true);
-        const text = await generateItinerary(session.booking, session.travelStyle);
-        setItinerary(text);
-        setLoadingItinerary(false);
-    }
-    fetchItinerary();
-
-  }, [session]);
-
-  // Trigger Image Generation when `attractions` updates
-  useEffect(() => {
-    if (attractions.length === 0) return;
-
-    const fetchImages = async () => {
-        const displayed = [...nearbyAttractions, ...popularAttractions];
-        const targets = displayed.filter((attr) => !generatedImages[attr.id] && !attr.imageUrl);
-        if (targets.length === 0) return;
-
-        const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-        for (const attr of targets) {
-            setGeneratedImages(prev => ({
-                ...prev,
-                [attr.id]: getAttractionPlaceholder(attr.type, attr.name)
-            }));
-            const img = await generateAttractionImage(attr.type, attr.name);
-            if (img) {
-                setGeneratedImages(prev => ({ ...prev, [attr.id]: img }));
-            }
-            // Throttle requests to avoid rate limits
-            await sleep(800);
-        }
-    };
-    fetchImages();
-  }, [attractions]);
-
-  const handleAttractionClick = async (attraction: Attraction) => {
-    setSelectedAttraction(attraction);
-    setDirectionStep('initial'); 
-    
-    // Update map to center on attraction (Simple Pin)
-    const attrMap = `https://maps.google.com/maps?q=${encodeURIComponent(attraction.name + " " + session.booking.location)}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
-    setMapUrl(attrMap);
-    setMapKey(prev => prev + 1); // Force reload
-
-    // Check Cache first
-    if (insightCache[attraction.name]) {
-        setAiContent(insightCache[attraction.name]);
-        setLoadingAi(false);
-    } else {
-        setLoadingAi(true);
-        setAiContent('');
-        
-        // Call Gemini
-        const content = await generateConciergeInfo(
-          attraction.name, 
-          session.booking.location, 
-          session.travelStyle
-        );
-        
-        setAiContent(content);
-        setInsightCache(prev => ({...prev, [attraction.name]: content}));
-        setLoadingAi(false);
-    }
-  };
-
-  const closeDrawer = () => {
-    setSelectedAttraction(null);
-  };
-
-  const handleReturnToHotel = () => {
-      // Reset to hotel view
-      const baseMap = `https://maps.google.com/maps?q=${encodeURIComponent(session.booking.hotelName + " " + session.booking.location)}&t=&z=14&ie=UTF8&iwloc=&output=embed`;
-      setMapUrl(baseMap);
-      setMapKey(prev => prev + 1); // Force reload
-      setSelectedAttraction(null);
-  };
-
-  const handleCalculateRoute = () => {
-      setDirectionStep('calculating');
-      // Simulate calculation delay
-      setTimeout(() => {
-          const randomMins = Math.floor(Math.random() * 20) + 10;
-          setCalculatedTime(`${randomMins} min drive`);
-          setDirectionStep('ready');
-
-          // Update Map to show Directions
-          if (selectedAttraction) {
-              const start = encodeURIComponent(session.booking.hotelName);
-              const end = encodeURIComponent(selectedAttraction.name);
-              // Using saddr/daddr to force direction mode in legacy embed
-              const dirMap = `https://maps.google.com/maps?saddr=${start}&daddr=${end}&output=embed&z=12`;
-              setMapUrl(dirMap);
-              setMapKey(prev => prev + 1); // Force reload
-          }
-      }, 1500);
-  };
-
-  const handleOpenMaps = () => {
-      if (selectedAttraction) {
-          window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(selectedAttraction.name + ' ' + session.booking.location)}`, '_blank');
-      }
-  };
-
-  const handleChatSubmit = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!chatMessage.trim()) return;
-
-      const userMsg = chatMessage;
-      setChatMessage('');
-      setChatHistory(prev => [...prev, {role: 'user', text: userMsg}]);
-      setIsChatLoading(true);
-
-      // Convert format for API
-      const historyForApi = chatHistory.map(h => ({
-          role: h.role,
-          parts: [{ text: h.text }]
-      }));
-
-      const response = await chatWithConcierge(userMsg, historyForApi, session.booking.hotelName);
-      
-      setChatHistory(prev => [...prev, {role: 'model', text: response || "I'm sorry, I couldn't understand that."}]);
-      setIsChatLoading(false);
-  };
-
-  useEffect(() => {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatHistory, isChatOpen]);
-
-  // Render Helper for Images
-  const renderAttractionImage = (attr: Attraction) => {
-      const img = generatedImages[attr.id] || attr.imageUrl;
-      
-      if (!img) {
-          return (
-            <div className="w-20 h-20 rounded-xl bg-gray-50 flex flex-col items-center justify-center shrink-0 border border-gray-100 shadow-inner">
-                 <div className="w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-1"></div>
-                 <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wide">Generating 3D...</span>
-            </div>
-          );
-      }
-
-      return (
-         <div
-            className="w-20 h-20 rounded-xl bg-white bg-cover bg-center shrink-0 shadow-inner border border-gray-100"
-            style={{ backgroundImage: `url("${img}")` }}
-         ></div>
-      );
-  };
-
-  const renderLargeAttractionImage = (attr: Attraction) => {
-      const img = generatedImages[attr.id] || attr.imageUrl;
-      
-      if (!img) {
-          return (
-            <div className="w-full h-56 rounded-3xl bg-gray-50 flex flex-col items-center justify-center mb-8 border border-gray-100">
-                 <div className="relative w-16 h-16 mb-3">
-                     <div className="absolute inset-0 border-4 border-gray-200 rounded-full"></div>
-                     <div className="absolute inset-0 border-4 border-primary rounded-full border-t-transparent animate-spin"></div>
-                 </div>
-                 <p className="text-sm font-bold text-slate-500 animate-pulse">Creating 3D Asset...</p>
-            </div>
-          );
-      }
-
-      return (
-          <img src={img} alt={attr.name} className="w-full h-56 object-cover rounded-3xl mb-8 shadow-lg bg-white" />
-      );
-  }
-
-  return (
-    <div className="relative w-full max-w-[480px] h-full sm:h-[90vh] bg-white sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden ring-1 ring-white/10 animate-fade-in font-display">
-      {/* Header */}
-      <header className="absolute top-0 left-0 right-0 z-40 flex items-center justify-between px-6 py-4 bg-white/90 backdrop-blur-xl border-b border-gray-100">
-        <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white shadow-lg shadow-primary/30">
-                <span className="material-symbols-outlined text-lg">diamond</span>
-            </div>
-            <div>
-                <h1 className="text-primary text-[10px] font-bold tracking-widest uppercase mb-0.5">
-                    Concierge
-                </h1>
-                <p className="text-slate-900 text-xs font-bold truncate max-w-[150px]">
-                    {session.booking.hotelName}
-                </p>
-            </div>
-        </div>
-        <div className="size-9 rounded-full overflow-hidden border-2 border-white shadow-md ring-1 ring-gray-100">
-             <img src={session.generatedAvatar || ''} alt="User" className="w-full h-full object-cover bg-gray-50" />
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto pt-24 pb-32 no-scrollbar bg-gray-50/50">
-        {/* Greeting */}
-        <div className="px-6 mb-8">
-            <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">
-                {session.booking.location}
-            </p>
-            <h2 className="text-3xl font-serif font-medium text-slate-900 leading-tight">
-                Hello, {session.booking.firstName}.
-            </h2>
-        </div>
-
-        {/* Interactive Map */}
-        <div className="px-6 mb-8">
-             <div className="relative w-full h-[280px] rounded-3xl overflow-hidden shadow-xl shadow-slate-200/50 border border-white group">
-                <iframe 
-                    key={mapKey}
-                    width="100%" 
-                    height="100%" 
-                    frameBorder="0" 
-                    scrolling="no" 
-                    marginHeight={0} 
-                    marginWidth={0} 
-                    src={mapUrl}
-                    className="w-full h-full grayscale-[20%] contrast-[110%]"
-                    title="Hotel Map"
-                ></iframe>
-                
-                {/* Return to Hotel Button (On Map) */}
-                <button 
-                    onClick={handleReturnToHotel}
-                    className="absolute top-4 right-4 bg-white text-slate-900 shadow-lg rounded-xl p-3 flex items-center justify-center transition-all z-20 hover:scale-105 active:scale-95 border border-gray-100"
-                    title="Return to Hotel"
-                >
-                    <span className="material-symbols-outlined text-xl">home_pin</span>
-                </button>
-
-                {/* Map Overlay Controls */}
-                <div className="absolute bottom-4 left-4 right-4 flex gap-2 overflow-x-auto no-scrollbar pb-1 pointer-events-none">
-                     <div className="flex gap-2 pointer-events-auto">
-                        {loadingAttractions ? (
-                             // Skeleton for pills
-                             [1,2,3].map(i => (
-                                 <div key={i} className="h-8 w-20 bg-gray-200/80 animate-pulse rounded-full backdrop-blur"></div>
-                             ))
-                        ) : (
-                            nearbyAttractions.map((attr) => (
-                                <button key={attr.id} onClick={() => handleAttractionClick(attr)} className="flex items-center gap-1.5 bg-white/95 backdrop-blur shadow-md rounded-full pl-2 pr-3 py-1.5 text-[11px] font-bold text-slate-700 whitespace-nowrap hover:text-primary hover:bg-white transition-colors border border-gray-100/50">
-                                    <span className="material-symbols-outlined text-sm text-primary">{attr.icon}</span>
-                                    {attr.name}
-                                </button>
-                            ))
-                        )}
-                     </div>
-                </div>
-             </div>
-        </div>
-
-        {/* Recommendations List */}
-        <div className="px-6 space-y-8">
-             
-             {loadingAttractions ? (
-                 <div className="space-y-4">
-                     <div className="h-4 bg-gray-200 rounded w-1/3 animate-pulse"></div>
-                     <div className="h-20 bg-gray-100 rounded-2xl animate-pulse"></div>
-                     <div className="h-20 bg-gray-100 rounded-2xl animate-pulse"></div>
-                 </div>
-             ) : (
-                <>
-                 {/* Nearby */}
-                 <div>
-                     <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2 uppercase tracking-wide">
-                        Nearby Gems
-                     </h3>
-                     <div className="grid grid-cols-1 gap-4">
-                        {nearbyAttractions.map((attr) => (
-                            <div 
-                                key={attr.id}
-                                onClick={() => handleAttractionClick(attr)}
-                                className="group flex items-center gap-4 p-3 bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:shadow-lg transition-all cursor-pointer border border-transparent hover:border-primary/10"
-                            >
-                                {renderAttractionImage(attr)}
-                                <div className="flex-1 min-w-0">
-                                    <h4 className="font-bold text-base text-slate-900 truncate group-hover:text-primary transition-colors">{attr.name}</h4>
-                                    <p className="text-xs text-slate-500 truncate mb-2">{attr.type}</p>
-                                </div>
-                                <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-primary group-hover:text-white transition-all">
-                                    <span className="material-symbols-outlined text-lg">arrow_forward</span>
-                                </div>
-                            </div>
-                        ))}
-                     </div>
-                 </div>
-
-                 {/* Popular */}
-                 <div>
-                     <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2 uppercase tracking-wide">
-                        Trending in {city}
-                     </h3>
-                     <div className="grid grid-cols-1 gap-4">
-                        {popularAttractions.map((attr) => (
-                            <div 
-                                key={attr.id}
-                                onClick={() => handleAttractionClick(attr)}
-                                className="group flex items-center gap-4 p-3 bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:shadow-lg transition-all cursor-pointer border border-transparent hover:border-primary/10"
-                            >
-                                 {renderAttractionImage(attr)}
-                                <div className="flex-1 min-w-0">
-                                    <h4 className="font-bold text-base text-slate-900 truncate group-hover:text-primary transition-colors">{attr.name}</h4>
-                                    <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">{attr.description}</p>
-                                </div>
-                            </div>
-                        ))}
-                     </div>
-                 </div>
-                </>
-             )}
-
-             {/* AI Itinerary */}
-             <div className="bg-[#22262a] p-6 rounded-3xl text-white shadow-xl shadow-slate-300 relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-8 opacity-5">
-                     <span className="material-symbols-outlined text-[120px]">calendar_month</span>
-                </div>
-                <div className="relative z-10">
-                    <div className="flex items-center gap-3 mb-5">
-                        <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-amber-400">
-                             <span className="material-symbols-outlined text-lg">auto_awesome</span>
-                        </div>
-                        <h3 className="font-serif text-xl font-medium">Your AI Itinerary</h3>
-                    </div>
-                    {loadingItinerary ? (
-                        <div className="space-y-4 opacity-50">
-                            <div className="h-2 bg-white/20 rounded w-3/4 animate-pulse"></div>
-                            <div className="h-2 bg-white/20 rounded w-1/2 animate-pulse"></div>
-                            <div className="h-2 bg-white/20 rounded w-full animate-pulse"></div>
-                        </div>
-                    ) : (
-                        <div className="text-sm font-light leading-relaxed text-gray-300">
-                             <ReactMarkdown 
-                                components={{
-                                    h1: ({node, ...props}) => <h1 className="text-base font-bold text-amber-400 mt-4 mb-2 uppercase tracking-wider" {...props} />,
-                                    h2: ({node, ...props}) => <h2 className="text-sm font-bold text-white mt-3 mb-1" {...props} />,
-                                    ul: ({node, ...props}) => <ul className="list-none space-y-2 my-2" {...props} />,
-                                    li: ({node, ...props}) => <li className="text-xs text-gray-300 pl-4 border-l border-white/20" {...props} />,
-                                    p: ({node, ...props}) => <p className="text-xs text-gray-400 mb-2" {...props} />,
-                                    strong: ({node, ...props}) => <strong className="text-white font-medium" {...props} />
-                                }}
-                             >
-                                {itinerary}
-                             </ReactMarkdown>
-                        </div>
-                    )}
-                </div>
-             </div>
-        </div>
-      </main>
-
-      {/* Floating Action Button */}
-      <div className="absolute bottom-8 left-0 right-0 flex justify-center px-6 z-40 pointer-events-none">
-        <button 
-            onClick={() => setIsChatOpen(true)}
-            className="pointer-events-auto flex items-center justify-center gap-3 bg-slate-900 text-white font-bold py-4 px-8 rounded-full shadow-2xl hover:scale-[1.02] active:scale-95 transition-all w-full max-w-sm border border-white/10"
-        >
-            <span className="material-symbols-outlined">smart_toy</span>
-            <span>Ask Concierge</span>
-        </button>
-      </div>
-
-      {/* Drawer/Modal for Attraction Details */}
-      {selectedAttraction && (
-        <div className="absolute inset-0 z-50 flex flex-col justify-end bg-black/60 backdrop-blur-sm animate-fade-in">
-            <div className="bg-white rounded-t-[2rem] p-6 shadow-2xl animate-slide-up h-[85%] flex flex-col">
-                <div className="flex justify-between items-start mb-6">
-                    <div>
-                        <h3 className="text-3xl font-serif font-medium text-slate-900">{selectedAttraction.name}</h3>
-                        <div className="flex items-center gap-2 mt-2">
-                            <span className="text-[10px] font-bold uppercase text-primary tracking-widest bg-primary/5 px-2 py-1 rounded-md">{selectedAttraction.category}</span>
-                            <span className="text-[10px] font-bold uppercase text-slate-400 tracking-widest bg-slate-50 px-2 py-1 rounded-md">{selectedAttraction.type}</span>
-                        </div>
-                    </div>
-                    <button onClick={closeDrawer} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors">
-                        <span className="material-symbols-outlined text-slate-600">close</span>
-                    </button>
-                </div>
-                
-                <div className="flex-1 overflow-y-auto no-scrollbar pb-6">
-                    {renderLargeAttractionImage(selectedAttraction)}
-                    
-                    <div className="bg-[#fffbf0] p-6 rounded-3xl relative overflow-hidden mb-8 border border-amber-100">
-                        <span className="material-symbols-outlined absolute -top-4 -right-4 text-amber-500/10 text-[120px]">history_edu</span>
-                        <div className="relative z-10">
-                            <div className="flex items-center gap-2 mb-3">
-                                <span className="material-symbols-outlined text-amber-600 text-sm">lightbulb</span>
-                                <span className="text-xs font-bold uppercase tracking-widest text-amber-700">Gemini Insight</span>
-                            </div>
-                            {loadingAi ? (
-                                <div className="space-y-2 animate-pulse">
-                                    <div className="h-4 bg-amber-500/10 rounded w-3/4"></div>
-                                    <div className="h-4 bg-amber-500/10 rounded w-full"></div>
-                                    <div className="h-4 bg-amber-500/10 rounded w-5/6"></div>
-                                </div>
-                            ) : (
-                                <p className="text-sm text-amber-900/80 font-serif leading-relaxed italic">
-                                    "{aiContent}"
-                                </p>
-                            )}
-                        </div>
-                    </div>
-                    
-                    <h4 className="font-bold text-slate-900 mb-2">About this place</h4>
-                    <p className="text-sm text-slate-500 leading-relaxed">{selectedAttraction.description}</p>
-                </div>
-                
-                {/* Navigation Action */}
-                <div className="mt-auto pt-4 space-y-3">
-                    {/* View on Google Maps Button */}
-                    <button 
-                        onClick={handleOpenMaps}
-                        className="w-full bg-white text-slate-900 border border-slate-200 font-bold py-4 rounded-xl flex items-center justify-center gap-2 hover:bg-slate-50 transition-colors"
-                    >
-                         <span className="material-symbols-outlined text-red-500">map</span>
-                         <span>Open in Google Maps</span>
-                    </button>
-
-                    {directionStep === 'initial' && (
-                        <button 
-                            onClick={handleCalculateRoute}
-                            className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 hover:bg-black transition-colors"
-                        >
-                            <span className="material-symbols-outlined">directions</span>
-                            <span>Plan Route Here</span>
-                        </button>
-                    )}
-
-                    {directionStep === 'calculating' && (
-                        <button disabled className="w-full bg-slate-100 text-slate-400 font-bold py-4 rounded-xl flex items-center justify-center gap-2 cursor-wait">
-                            <span className="material-symbols-outlined animate-spin">progress_activity</span>
-                            <span>Calculating...</span>
-                        </button>
-                    )}
-
-                    {directionStep === 'ready' && (
-                         <div className="flex flex-col gap-2 animate-fade-in">
-                             <div className="bg-green-50 text-green-700 p-3 rounded-xl flex items-center justify-center gap-2 border border-green-100">
-                                <span className="material-symbols-outlined text-sm">timer</span>
-                                <span className="font-bold text-sm">{calculatedTime} from hotel</span>
-                             </div>
-                             <button 
-                                onClick={handleOpenMaps}
-                                className="w-full bg-primary text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 hover:bg-primary-dark transition-colors"
-                            >
-                                <span className="material-symbols-outlined">navigation</span>
-                                <span>Navigate Now</span>
-                            </button>
-                         </div>
-                    )}
-                </div>
-            </div>
-        </div>
-      )}
-
-      {/* Chat Modal - Styled */}
-      {isChatOpen && (
-          <div className="absolute inset-0 z-50 flex flex-col bg-background-light animate-fade-in">
-              <div className="flex items-center justify-between p-4 bg-white/90 backdrop-blur border-b border-gray-100">
-                  <div className="flex items-center gap-3">
-                       <div className="w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center text-white">
-                           <span className="material-symbols-outlined text-sm">smart_toy</span>
-                       </div>
-                       <span className="font-bold text-slate-900">Concierge Chat</span>
-                  </div>
-                  <button onClick={() => setIsChatOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
-                      <span className="material-symbols-outlined">close</span>
-                  </button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                  <div className="flex gap-4">
-                      <div className="w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center text-white shrink-0 shadow-md">
-                          <span className="material-symbols-outlined text-sm">support_agent</span>
-                      </div>
-                      <div className="bg-white p-4 rounded-2xl rounded-tl-none shadow-sm text-sm text-slate-600 max-w-[85%] border border-gray-100">
-                          Hello! I'm your digital concierge. Ask me anything about {session.booking.hotelName} or {city}.
-                      </div>
-                  </div>
-                  {chatHistory.map((msg, idx) => (
-                      <div key={idx} className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white shrink-0 shadow-md ${msg.role === 'user' ? 'bg-primary' : 'bg-slate-900'}`}>
-                              <span className="material-symbols-outlined text-sm">{msg.role === 'user' ? 'person' : 'support_agent'}</span>
-                          </div>
-                          <div className={`p-4 rounded-2xl shadow-sm text-sm max-w-[85%] ${msg.role === 'user' ? 'bg-primary text-white rounded-tr-none' : 'bg-white text-slate-600 rounded-tl-none border border-gray-100'}`}>
-                              {msg.text}
-                          </div>
-                      </div>
-                  ))}
-                  {isChatLoading && (
-                      <div className="flex gap-4">
-                           <div className="w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center text-white shrink-0">
-                                <span className="material-symbols-outlined text-sm">support_agent</span>
-                           </div>
-                           <div className="bg-white p-4 rounded-2xl rounded-tl-none shadow-sm flex gap-1 border border-gray-100">
-                               <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></div>
-                               <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-75"></div>
-                               <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-150"></div>
-                           </div>
-                      </div>
-                  )}
-                  <div ref={chatEndRef}></div>
-              </div>
-              <form onSubmit={handleChatSubmit} className="p-4 bg-white border-t border-gray-100">
-                  <div className="relative">
-                      <input 
-                        type="text" 
-                        value={chatMessage}
-                        onChange={(e) => setChatMessage(e.target.value)}
-                        placeholder="Type a message..." 
-                        className="w-full pl-5 pr-14 py-4 bg-slate-50 rounded-full border-transparent focus:bg-white focus:border-slate-200 focus:ring-4 focus:ring-slate-100 transition-all text-sm font-medium"
-                      />
-                      <button type="submit" disabled={isChatLoading || !chatMessage.trim()} className="absolute right-2 top-2 p-2 bg-slate-900 text-white rounded-full disabled:opacity-50 hover:bg-black transition-colors shadow-md">
-                          <span className="material-symbols-outlined text-sm">arrow_upward</span>
-                      </button>
-                  </div>
-              </form>
-          </div>
-      )}
-    </div>
-  );
+const getStoredKey = () => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem('GEMINI_API_KEY') || '';
 };
 
-export default DashboardStep;
+const initKey = () => {
+    const stored = getStoredKey();
+    if (stored) {
+        apiKey = stored;
+    }
+};
+
+initKey();
+
+const GEMINI_BASE_URL = 'https://ai.juguang.chat/v1beta/models';
+const CACHE_PREFIX = 'gemini-cache:';
+
+const isBrowser = () => typeof window !== 'undefined';
+
+const toBase64 = (value: string) => {
+    if (!isBrowser() || typeof btoa === 'undefined') return value;
+    try {
+        return btoa(unescape(encodeURIComponent(value)));
+    } catch {
+        return value;
+    }
+};
+
+const buildCacheKey = (type: string, model: string, prompt: string) => {
+    const raw = `${type}|${model}|${prompt}`;
+    return `${CACHE_PREFIX}${toBase64(raw)}`;
+};
+
+const readCache = <T>(key: string): T | null => {
+    if (!isBrowser()) return null;
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed?.value ?? null;
+    } catch {
+        return null;
+    }
+};
+
+const writeCache = <T>(key: string, value: T) => {
+    if (!isBrowser()) return;
+    try {
+        localStorage.setItem(key, JSON.stringify({ value, ts: Date.now() }));
+    } catch {
+        // ignore cache write failures
+    }
+};
+
+export const clearGeminiCache = () => {
+    if (!isBrowser()) return;
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(CACHE_PREFIX)) {
+            keysToRemove.push(key);
+        }
+    }
+    keysToRemove.forEach((key) => localStorage.removeItem(key));
+};
+
+const buildTextRequest = (prompt: string, maxOutputTokens = 1024) => ({
+    contents: [
+        {
+            parts: [{ text: prompt }]
+        }
+    ],
+    generationConfig: {
+        temperature: 0.7,
+        topK: 20,
+        topP: 0.8,
+        maxOutputTokens
+    }
+});
+
+const buildImageRequest = (prompt: string, maxOutputTokens = 256) => ({
+    contents: [
+        {
+            parts: [{ text: prompt }]
+        }
+    ],
+    generationConfig: {
+        temperature: 0.7,
+        topK: 20,
+        topP: 0.8,
+        maxOutputTokens
+    },
+    safetySettings: [
+        {
+            category: "HARM_CATEGORY_HARASSMENT",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+        },
+        {
+            category: "HARM_CATEGORY_HATE_SPEECH",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+        },
+        {
+            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+        },
+        {
+            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+        }
+    ]
+});
+
+const buildChatRequest = (
+    history: { role: string; parts: { text: string }[] }[],
+    message: string
+) => ({
+    contents: [
+        ...history.map((item) => ({
+            role: item.role,
+            parts: item.parts
+        })),
+        {
+            role: 'user',
+            parts: [{ text: message }]
+        }
+    ],
+    generationConfig: {
+        temperature: 0.6,
+        topK: 20,
+        topP: 0.8,
+        maxOutputTokens: 1024
+    }
+});
+
+const fetchGemini = async (
+    model: string,
+    body: unknown,
+    options?: {
+        maxAttempts?: number;
+        timeoutMs?: number;
+        retryDelayMs?: number;
+    }
+) => {
+    const maxAttempts = options?.maxAttempts ?? 2;
+    const timeoutMs = options?.timeoutMs ?? 30000;
+    const retryDelayMs = options?.retryDelayMs ?? 800;
+    let attempt = 0;
+    let lastError: Error | null = null;
+
+    while (attempt <= maxAttempts) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+            const response = await fetch(`${GEMINI_BASE_URL}/${model}:generateContent`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                // Retry once on rate limits
+                if (response.status === 429 && attempt < maxAttempts) {
+                    await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+                    attempt += 1;
+                    continue;
+                }
+                throw new Error(`Gemini API error ${response.status}: ${errorText}`);
+            }
+
+            return response.json();
+        } catch (error: any) {
+            lastError = error;
+            if (attempt >= maxAttempts) break;
+            await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+            attempt += 1;
+        }
+    }
+
+    throw lastError || new Error('Gemini API request failed.');
+};
+
+const extractText = (response: any) =>
+    response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+const extractImageUrl = (response: any) => {
+    // Preferred inlineData
+    const parts = response?.candidates?.[0]?.content?.parts || [];
+    for (const part of parts) {
+        if (part?.inlineData?.data) {
+            const mimeType = part.inlineData.mimeType || 'image/png';
+            return `data:${mimeType};base64,${part.inlineData.data}`;
+        }
+    }
+
+    // Alternate response shapes seen in other endpoints
+    if (response?.image?.url) return response.image.url;
+    if (Array.isArray(response?.images) && response.images.length > 0) {
+        return response.images[0]?.url || response.images[0];
+    }
+    if (Array.isArray(response?.data) && response.data.length > 0) {
+        return response.data[0]?.url || response.data[0];
+    }
+
+    return null;
+};
+
+const fetchImageWithFallback = async (
+    model: string,
+    prompt: string,
+    fastTokens: number,
+    slowTokens: number
+) => {
+    // Fast attempt first
+    const fastResponse = await fetchGemini(
+        model,
+        buildImageRequest(prompt, fastTokens),
+        { maxAttempts: 0, timeoutMs: 20000 }
+    );
+    const fastImage = extractImageUrl(fastResponse);
+    if (fastImage) return fastImage;
+
+    // Fallback with higher token budget (more reliable)
+    const slowResponse = await fetchGemini(
+        model,
+        buildImageRequest(prompt, slowTokens),
+        { maxAttempts: 0, timeoutMs: 30000 }
+    );
+    return extractImageUrl(slowResponse);
+};
+
+const buildPlaceholderDataUrl = (label: string) => {
+    const safeLabel = label.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const svg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+          <defs>
+            <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="100%" stop-color="#f1f5f9"/>
+            </linearGradient>
+          </defs>
+          <rect width="512" height="512" rx="72" fill="url(#bg)"/>
+          <rect x="56" y="56" width="400" height="400" rx="56" fill="#ffffff" stroke="#e2e8f0" stroke-width="8"/>
+          <text x="256" y="250" text-anchor="middle" font-family="Manrope, Arial, sans-serif" font-size="20" fill="#64748b">
+            Generating
+          </text>
+          <text x="256" y="285" text-anchor="middle" font-family="Manrope, Arial, sans-serif" font-size="16" fill="#94a3b8">
+            ${safeLabel}
+          </text>
+        </svg>
+    `;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
+
+export const getAttractionPlaceholder = (type: string, name: string) =>
+    buildPlaceholderDataUrl(`${name}`);
+
+export const setApiKey = (key: string) => {
+    apiKey = key.trim();
+    if (typeof window !== 'undefined') {
+        if (apiKey) {
+            localStorage.setItem('GEMINI_API_KEY', apiKey);
+        } else {
+            localStorage.removeItem('GEMINI_API_KEY');
+        }
+    }
+};
+
+export const generateConciergeInfo = async (
+  attractionName: string,
+  city: string,
+  travelStyle: TravelStyle,
+  forceRefresh = false
+): Promise<string> => {
+  if (!apiKey) return "Please configure your API Key to access AI insights.";
+
+  try {
+    const prompt = `
+      Act as a luxury hotel concierge. 
+      Write a short, engaging 2-sentence cultural fact or tip about ${attractionName} in ${city}.
+      Tailor the tone for a ${travelStyle} traveler.
+    `;
+
+    const cacheKey = buildCacheKey('concierge', 'gemini-2.0-flash-lite', prompt);
+    if (!forceRefresh) {
+        const cached = readCache<string>(cacheKey);
+        if (cached) return cached;
+    }
+
+    const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 512));
+    const text = extractText(response);
+    if (text) writeCache(cacheKey, text);
+    return text || "Information unavailable at the moment.";
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    return "Our concierge service is momentarily unavailable.";
+  }
+};
+
+export const generateSouvenirCaption = async (
+  location: string,
+  travelStyle: TravelStyle,
+  forceRefresh = false
+): Promise<string> => {
+  if (!apiKey) return "To travel is to live.";
+
+  try {
+    const prompt = `
+      Generate a short, inspiring travel quote (max 10 words) for a postcard from ${location}.
+      The vibe should be ${travelStyle}. 
+      Do not include quotes or attribution, just the text.
+    `;
+
+    const cacheKey = buildCacheKey('souvenir-caption', 'gemini-2.0-flash-lite', prompt);
+    if (!forceRefresh) {
+        const cached = readCache<string>(cacheKey);
+        if (cached) return cached;
+    }
+
+    const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 128));
+    const text = extractText(response);
+    if (text) writeCache(cacheKey, text);
+    return text?.trim() || "Memories made here.";
+  } catch (error) {
+    return "A moment in time.";
+  }
+};
+
+export const generatePostcardImage = async (
+    hotelName: string,
+    location: string,
+    style: TravelStyle,
+    forceRefresh = false
+): Promise<string | null> => {
+    if (!apiKey) return null;
+
+    try {
+        const prompt = `Premium travel postcard of ${hotelName}, ${location}. ${style} vibe, warm lighting, scenic view. No text.`;
+
+        const cacheKey = buildCacheKey('postcard-image', 'gemini-2.5-flash-image-preview', prompt);
+        if (!forceRefresh) {
+            const cached = readCache<string>(cacheKey);
+            if (cached) return cached;
+        }
+
+        const image = await fetchImageWithFallback(
+            'gemini-2.5-flash-image-preview',
+            prompt,
+            256,
+            1024
+        );
+        if (image) writeCache(cacheKey, image);
+        return image;
+    } catch (error) {
+        console.error("Postcard Gen Error:", error);
+        return null;
+    }
+}
+
+// "Nano Banana" - Avatar Generation
+export const generateAvatar = async (
+    style: TravelStyle,
+    forceRefresh = false
+): Promise<string | null> => {
+    if (!apiKey) return null;
+
+    try {
+        // Updated prompt for cleaner, brighter, preset-matching style
+        const prompt = `Cute 3D traveler avatar, ${style} style, bright studio lighting, clean white background, centered headshot.`;
+
+        const cacheKey = buildCacheKey('avatar-image', 'gemini-2.5-flash-image-preview', prompt);
+        if (!forceRefresh) {
+            const cached = readCache<string>(cacheKey);
+            if (cached) return cached;
+        }
+
+        const image = await fetchImageWithFallback(
+            'gemini-2.5-flash-image-preview',
+            prompt,
+            256,
+            1024
+        );
+        if (image) writeCache(cacheKey, image);
+        return image;
+    } catch (error) {
+        console.error("Avatar Gen Error:", error);
+        return null;
+    }
+}
+
+// "Nano Banana" - Attraction 3D Asset Generation
+export const generateAttractionImage = async (
+    type: string,
+    name: string,
+    forceRefresh = false
+): Promise<string | null> => {
+    if (!apiKey) return null;
+
+    try {
+        const prompt = `Cute 3D icon for ${type} (${name}), toy-like, bright colors, soft studio lighting, white background, single object.`;
+
+        const cacheKey = buildCacheKey('attraction-image', 'gemini-2.5-flash-image-preview', prompt);
+        if (!forceRefresh) {
+            const cached = readCache<string>(cacheKey);
+            if (cached) return cached;
+        }
+
+        const image = await fetchImageWithFallback(
+            'gemini-2.5-flash-image-preview',
+            prompt,
+            256,
+            768
+        );
+        if (image) writeCache(cacheKey, image);
+        return image;
+    } catch (error) {
+        console.error("Attraction Image Gen Error:", error);
+        return null;
+    }
+}
+
+// NEW: Dynamic Attraction Generation (JSON)
+export const generateDynamicAttractions = async (
+    location: string,
+    style: TravelStyle,
+    forceRefresh = false
+): Promise<Attraction[]> => {
+    if (!apiKey) return [];
+
+    try {
+        const prompt = `
+            Identify 3 "Nearby" hidden gems/activities and 3 "Must-See" famous landmarks in ${location}.
+            Target Audience: ${style} traveler.
+            Return a JSON object with a list of attractions.
+            For 'icon', suggest a valid Material Symbol name (snake_case) that represents the place (e.g. 'restaurant', 'park', 'museum', 'photo_camera').
+        `;
+
+        const cacheKey = buildCacheKey('dynamic-attractions', 'gemini-2.0-flash-lite', prompt);
+        if (!forceRefresh) {
+            const cached = readCache<Attraction[]>(cacheKey);
+            if (cached) return cached;
+        }
+
+        const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 1024));
+        const text = extractText(response) || "{}";
+        const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/\{[\s\S]*\}/);
+        const json = JSON.parse(jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : text);
+        const list = json.attractions || [];
+
+        // Map to internal Attraction interface
+        const mapped = list.map((item: any, index: number) => ({
+            id: 9000 + index + Math.floor(Math.random() * 1000), // Random ID to avoid collision
+            name: item.name,
+            type: item.type,
+            category: item.category,
+            icon: item.icon || 'place',
+            description: item.description,
+            coordinates: { top: '50%', left: '50%' }, // Dummy coordinates as we use iframe maps
+            imageUrl: '' // Will be generated separately
+        }));
+        writeCache(cacheKey, mapped);
+        return mapped;
+
+    } catch (error) {
+        console.error("Dynamic Attraction Gen Error:", error);
+        return [];
+    }
+}
+
+export const chatWithConcierge = async (
+    message: string, 
+    history: {role: string, parts: {text: string}[]}[],
+    context: string
+) => {
+    if (!apiKey) return "System offline.";
+
+    try {
+        const systemPrompt = `You are a helpful, sophisticated hotel concierge at ${context}. Keep answers brief (under 50 words) and helpful.`;
+        const prompt = `${systemPrompt}\n\nUser: ${message}`;
+        const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 512));
+        return extractText(response) || "";
+    } catch (error) {
+        console.error("Chat Error", error);
+        return "I am having trouble connecting to the concierge network.";
+    }
+}
+
+export const generateItinerary = async (
+    booking: Booking,
+    style: TravelStyle,
+    forceRefresh = false
+): Promise<string> => {
+    if (!apiKey) return "Itinerary generation offline.";
+
+    try {
+        const prompt = `
+            Create a brief, daily itinerary for a trip to ${booking.location}.
+            Traveler Style: ${style}.
+            Dates: ${booking.checkInDate} to ${booking.checkOutDate}.
+            Format: Markdown, bullet points.
+            Focus: Provide a "Theme of the Day" and 2 key activities per day.
+            Keep it concise and exciting.
+        `;
+
+        const cacheKey = buildCacheKey('itinerary', 'gemini-2.0-flash-lite', prompt);
+        if (!forceRefresh) {
+            const cached = readCache<string>(cacheKey);
+            if (cached) return cached;
+        }
+
+        const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 1024));
+        const text = extractText(response) || "Could not generate itinerary.";
+        if (text) writeCache(cacheKey, text);
+        return text;
+    } catch (error) {
+        return "Itinerary service momentarily unavailable.";
+    }
+}
