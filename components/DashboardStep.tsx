@@ -47,8 +47,8 @@ const DashboardStep: React.FC<DashboardStepProps> = ({ session }) => {
   const city = session.booking.location.split(',')[0];
 
   // Derived lists
-  const nearbyAttractions = attractions.filter(a => a.category === 'Nearby');
-  const popularAttractions = attractions.filter(a => a.category === 'Must-See');
+  const nearbyAttractions = attractions.filter(a => a.category === 'Nearby').slice(0, 2);
+  const popularAttractions = attractions.filter(a => a.category === 'Must-See').slice(0, 2);
 
   useEffect(() => {
     // 1. Initial Map Setup (Centered on Hotel)
@@ -87,25 +87,16 @@ const DashboardStep: React.FC<DashboardStepProps> = ({ session }) => {
     if (attractions.length === 0) return;
 
     const fetchImages = async () => {
-        const targets = attractions.filter((attr) => !generatedImages[attr.id] && !attr.imageUrl);
+        const displayed = [...nearbyAttractions, ...popularAttractions];
+        const targets = displayed.filter((attr) => !generatedImages[attr.id] && !attr.imageUrl);
         if (targets.length === 0) return;
 
-        // Limit concurrency to avoid rate limits but speed up overall generation
-        const concurrency = 3;
-        let index = 0;
-
-        const worker = async () => {
-            while (index < targets.length) {
-                const current = targets[index];
-                index += 1;
-                const img = await generateAttractionImage(current.type, current.name);
-                if (img) {
-                    setGeneratedImages(prev => ({ ...prev, [current.id]: img }));
-                }
+        await Promise.all(targets.map(async (attr) => {
+            const img = await generateAttractionImage(attr.type, attr.name);
+            if (img) {
+                setGeneratedImages(prev => ({ ...prev, [attr.id]: img }));
             }
-        };
-
-        await Promise.all(Array.from({ length: Math.min(concurrency, targets.length) }, worker));
+        }));
     };
     fetchImages();
   }, [attractions]);
