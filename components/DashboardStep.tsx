@@ -91,7 +91,9 @@ const DashboardStep: React.FC<DashboardStepProps> = ({ session }) => {
         const targets = displayed.filter((attr) => !generatedImages[attr.id] && !attr.imageUrl);
         if (targets.length === 0) return;
 
-        await Promise.all(targets.map(async (attr) => {
+        const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+        for (const attr of targets) {
             setGeneratedImages(prev => ({
                 ...prev,
                 [attr.id]: getAttractionPlaceholder(attr.type, attr.name)
@@ -100,7 +102,9 @@ const DashboardStep: React.FC<DashboardStepProps> = ({ session }) => {
             if (img) {
                 setGeneratedImages(prev => ({ ...prev, [attr.id]: img }));
             }
-        }));
+            // Throttle requests to avoid rate limits
+            await sleep(800);
+        }
     };
     fetchImages();
   }, [attractions]);
