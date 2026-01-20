@@ -1,4 +1,3 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { TravelStyle, Booking, Attraction } from "../types";
 
 let apiKey = process.env.API_KEY || '';
@@ -17,7 +16,61 @@ const initKey = () => {
 
 initKey();
 
-const getClient = () => new GoogleGenAI({ apiKey });
+const GEMINI_BASE_URL = 'https://ai.juguang.chat/v1beta/models';
+
+const buildTextRequest = (prompt: string, maxOutputTokens = 1024) => ({
+    contents: [
+        {
+            parts: [{ text: prompt }]
+        }
+    ],
+    generationConfig: {
+        temperature: 0.7,
+        topK: 20,
+        topP: 0.8,
+        maxOutputTokens
+    }
+});
+
+const buildChatRequest = (
+    history: { role: string; parts: { text: string }[] }[],
+    message: string
+) => ({
+    contents: [
+        ...history.map((item) => ({
+            role: item.role,
+            parts: item.parts
+        })),
+        {
+            role: 'user',
+            parts: [{ text: message }]
+        }
+    ],
+    generationConfig: {
+        temperature: 0.6,
+        topK: 20,
+        topP: 0.8,
+        maxOutputTokens: 1024
+    }
+});
+
+const fetchGemini = async (model: string, body: unknown) => {
+    const response = await fetch(`${GEMINI_BASE_URL}/${model}:generateContent`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Gemini API error ${response.status}: ${errorText}`);
+    }
+
+    return response.json();
+};
 
 export const setApiKey = (key: string) => {
     apiKey = key.trim();
@@ -44,12 +97,9 @@ export const generateConciergeInfo = async (
       Tailor the tone for a ${travelStyle} traveler.
     `;
 
-    const response = await getClient().models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-    });
-
-    return response.text || "Information unavailable at the moment.";
+    const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 512));
+    const text = response?.candidates?.[0]?.content?.parts?.[0]?.text;
+    return text || "Information unavailable at the moment.";
   } catch (error) {
     console.error("Gemini API Error:", error);
     return "Our concierge service is momentarily unavailable.";
@@ -69,12 +119,9 @@ export const generateSouvenirCaption = async (
       Do not include quotes or attribution, just the text.
     `;
 
-    const response = await getClient().models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: prompt,
-    });
-
-    return response.text?.trim() || "Memories made here.";
+    const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 128));
+    const text = response?.candidates?.[0]?.content?.parts?.[0]?.text;
+    return text?.trim() || "Memories made here.";
   } catch (error) {
     return "A moment in time.";
   }
@@ -95,16 +142,12 @@ export const generatePostcardImage = async (
             No text overlay.
         `;
 
-        const response = await getClient().models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: {
-                parts: [
-                    { text: prompt }
-                ]
-            },
-        });
+        const response = await fetchGemini(
+            'gemini-3.0-flash-image-preview',
+            buildTextRequest(prompt, 1024)
+        );
 
-        for (const part of response.candidates[0].content.parts) {
+        for (const part of response?.candidates?.[0]?.content?.parts || []) {
             if (part.inlineData) {
                 return `data:image/png;base64,${part.inlineData.data}`;
             }
@@ -132,16 +175,12 @@ export const generateAvatar = async (style: TravelStyle): Promise<string | null>
             Do not include complex backgrounds or dark moody lighting.
         `;
 
-        const response = await getClient().models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: {
-                parts: [
-                    { text: prompt }
-                ]
-            },
-        });
+        const response = await fetchGemini(
+            'gemini-3.0-flash-image-preview',
+            buildTextRequest(prompt, 1024)
+        );
 
-        for (const part of response.candidates[0].content.parts) {
+        for (const part of response?.candidates?.[0]?.content?.parts || []) {
             if (part.inlineData) {
                 return `data:image/png;base64,${part.inlineData.data}`;
             }
@@ -166,16 +205,12 @@ export const generateAttractionImage = async (type: string, name: string): Promi
             Minimalist, single object.
         `;
 
-        const response = await getClient().models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: {
-                parts: [
-                    { text: prompt }
-                ]
-            },
-        });
+        const response = await fetchGemini(
+            'gemini-3.0-flash-image-preview',
+            buildTextRequest(prompt, 1024)
+        );
 
-        for (const part of response.candidates[0].content.parts) {
+        for (const part of response?.candidates?.[0]?.content?.parts || []) {
             if (part.inlineData) {
                 return `data:image/png;base64,${part.inlineData.data}`;
             }
@@ -202,33 +237,10 @@ export const generateDynamicAttractions = async (
             For 'icon', suggest a valid Material Symbol name (snake_case) that represents the place (e.g. 'restaurant', 'park', 'museum', 'photo_camera').
         `;
 
-        const response = await getClient().models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        attractions: {
-                            type: Type.ARRAY,
-                            items: {
-                                type: Type.OBJECT,
-                                properties: {
-                                    name: { type: Type.STRING },
-                                    type: { type: Type.STRING, description: "Short type e.g. Cafe, Park, Temple" },
-                                    category: { type: Type.STRING, enum: ["Nearby", "Must-See"] },
-                                    description: { type: Type.STRING, description: "Short engaging description, max 10 words" },
-                                    icon: { type: Type.STRING, description: "Material Symbol name" }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        const json = JSON.parse(response.text || "{}");
+        const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 1024));
+        const text = response?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+        const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/\{[\s\S]*\}/);
+        const json = JSON.parse(jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : text);
         const list = json.attractions || [];
 
         // Map to internal Attraction interface
@@ -257,16 +269,10 @@ export const chatWithConcierge = async (
     if (!apiKey) return "System offline.";
 
     try {
-        const chat = getClient().chats.create({
-            model: 'gemini-3-flash-preview',
-            history: history,
-            config: {
-                systemInstruction: `You are a helpful, sophisticated hotel concierge at ${context}. Keep answers brief (under 50 words) and helpful.`
-            }
-        });
-
-        const result = await chat.sendMessage({ message });
-        return result.text;
+        const systemPrompt = `You are a helpful, sophisticated hotel concierge at ${context}. Keep answers brief (under 50 words) and helpful.`;
+        const prompt = `${systemPrompt}\n\nUser: ${message}`;
+        const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 512));
+        return response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
     } catch (error) {
         console.error("Chat Error", error);
         return "I am having trouble connecting to the concierge network.";
@@ -289,12 +295,8 @@ export const generateItinerary = async (
             Keep it concise and exciting.
         `;
 
-        const response = await getClient().models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: prompt,
-        });
-
-        return response.text || "Could not generate itinerary.";
+        const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 1024));
+        return response?.candidates?.[0]?.content?.parts?.[0]?.text || "Could not generate itinerary.";
     } catch (error) {
         return "Itinerary service momentarily unavailable.";
     }
