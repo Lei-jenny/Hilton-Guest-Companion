@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserSession, Attraction } from '../types';
 import { MOCK_ATTRACTIONS } from '../services/mockService';
-import { generateConciergeInfo, chatWithConcierge, generateItinerary, generateAttractionImage, generateDynamicAttractions } from '../services/geminiService';
+import { generateConciergeInfo, chatWithConcierge, generateItinerary, generateAttractionImage, generateDynamicAttractions, getAttractionPlaceholder } from '../services/geminiService';
 import ReactMarkdown from 'react-markdown';
 
 interface DashboardStepProps {
@@ -92,6 +92,10 @@ const DashboardStep: React.FC<DashboardStepProps> = ({ session }) => {
         if (targets.length === 0) return;
 
         await Promise.all(targets.map(async (attr) => {
+            setGeneratedImages(prev => ({
+                ...prev,
+                [attr.id]: getAttractionPlaceholder(attr.type, attr.name)
+            }));
             const img = await generateAttractionImage(attr.type, attr.name);
             if (img) {
                 setGeneratedImages(prev => ({ ...prev, [attr.id]: img }));
