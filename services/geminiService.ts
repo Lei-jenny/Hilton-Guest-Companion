@@ -305,8 +305,8 @@ export const generatePostcardImage = async (
 
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
-            buildImageRequest(prompt, 256),
-            { maxAttempts: 0, timeoutMs: 25000 }
+            buildImageRequest(prompt, 1024),
+            { maxAttempts: 0, timeoutMs: 30000 }
         );
         const image = extractImageUrl(response);
         if (image) writeCache(cacheKey, image);
