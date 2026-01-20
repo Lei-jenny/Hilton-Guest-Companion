@@ -215,6 +215,30 @@ const extractImageUrl = (response: any) => {
     return null;
 };
 
+const fetchImageWithFallback = async (
+    model: string,
+    prompt: string,
+    fastTokens: number,
+    slowTokens: number
+) => {
+    // Fast attempt first
+    const fastResponse = await fetchGemini(
+        model,
+        buildImageRequest(prompt, fastTokens),
+        { maxAttempts: 0, timeoutMs: 20000 }
+    );
+    const fastImage = extractImageUrl(fastResponse);
+    if (fastImage) return fastImage;
+
+    // Fallback with higher token budget (more reliable)
+    const slowResponse = await fetchGemini(
+        model,
+        buildImageRequest(prompt, slowTokens),
+        { maxAttempts: 0, timeoutMs: 30000 }
+    );
+    return extractImageUrl(slowResponse);
+};
+
 const buildPlaceholderDataUrl = (label: string) => {
     const safeLabel = label.replace(/</g, "&lt;").replace(/>/g, "&gt;");
     const svg = `
@@ -329,12 +353,12 @@ export const generatePostcardImage = async (
             if (cached) return cached;
         }
 
-        const response = await fetchGemini(
+        const image = await fetchImageWithFallback(
             'gemini-2.5-flash-image-preview',
-            buildImageRequest(prompt, 1024),
-            { maxAttempts: 0, timeoutMs: 30000 }
+            prompt,
+            256,
+            1024
         );
-        const image = extractImageUrl(response);
         if (image) writeCache(cacheKey, image);
         return image;
     } catch (error) {
@@ -360,12 +384,12 @@ export const generateAvatar = async (
             if (cached) return cached;
         }
 
-        const response = await fetchGemini(
+        const image = await fetchImageWithFallback(
             'gemini-2.5-flash-image-preview',
-            buildImageRequest(prompt, 256),
-            { maxAttempts: 0, timeoutMs: 20000 }
+            prompt,
+            256,
+            1024
         );
-        const image = extractImageUrl(response);
         if (image) writeCache(cacheKey, image);
         return image;
     } catch (error) {
@@ -391,12 +415,12 @@ export const generateAttractionImage = async (
             if (cached) return cached;
         }
 
-        const response = await fetchGemini(
+        const image = await fetchImageWithFallback(
             'gemini-2.5-flash-image-preview',
-            buildImageRequest(prompt, 256),
-            { maxAttempts: 0, timeoutMs: 10000 }
+            prompt,
+            256,
+            768
         );
-        const image = extractImageUrl(response);
         if (image) writeCache(cacheKey, image);
         return image;
     } catch (error) {
