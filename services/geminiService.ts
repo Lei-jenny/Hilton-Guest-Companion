@@ -82,7 +82,7 @@ const buildTextRequest = (prompt: string, maxOutputTokens = 1024) => ({
     }
 });
 
-const buildImageRequest = (prompt: string, maxOutputTokens = 1024) => ({
+const buildImageRequest = (prompt: string, maxOutputTokens = 256) => ({
     contents: [
         {
             parts: [{ text: prompt }]
@@ -295,12 +295,7 @@ export const generatePostcardImage = async (
     if (!apiKey) return null;
 
     try {
-        const prompt = `
-            A beautiful, artistic travel poster illustration of ${hotelName} in ${location}.
-            Style: ${style} vibe, high-end digital art, warm lighting, scenic view. 
-            The image should look like a premium collectible postcard.
-            No text overlay.
-        `;
+        const prompt = `Premium travel postcard of ${hotelName}, ${location}. ${style} vibe, warm lighting, scenic view. No text.`;
 
         const cacheKey = buildCacheKey('postcard-image', 'gemini-2.5-flash-image-preview', prompt);
         if (!forceRefresh) {
@@ -310,7 +305,7 @@ export const generatePostcardImage = async (
 
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
-            buildImageRequest(prompt, 512),
+            buildImageRequest(prompt, 256),
             { maxAttempts: 0, timeoutMs: 25000 }
         );
         const image = extractImageUrl(response);
@@ -328,15 +323,7 @@ export const generateAvatar = async (style: TravelStyle): Promise<string | null>
 
     try {
         // Updated prompt for cleaner, brighter, preset-matching style
-        const prompt = `
-            Generate a 3D icon of a cute traveler avatar.
-            Style: Pixar/Disney 3D animation style.
-            Lighting: Bright studio lighting, soft shadows.
-            Background: Plain white or very soft light gray background (clean).
-            Character: ${style} traveler, friendly expression, vibrant colors.
-            Composition: Centered headshot icon. 
-            Do not include complex backgrounds or dark moody lighting.
-        `;
+        const prompt = `Cute 3D traveler avatar, ${style} style, bright studio lighting, clean white background, centered headshot.`;
 
         const cacheKey = buildCacheKey('avatar-image', 'gemini-2.5-flash-image-preview', prompt);
         const cached = readCache<string>(cacheKey);
@@ -344,7 +331,7 @@ export const generateAvatar = async (style: TravelStyle): Promise<string | null>
 
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
-            buildImageRequest(prompt, 512),
+            buildImageRequest(prompt, 256),
             { maxAttempts: 0, timeoutMs: 25000 }
         );
         const image = extractImageUrl(response);
@@ -365,13 +352,7 @@ export const generateAttractionImage = async (
     if (!apiKey) return null;
 
     try {
-        const prompt = `
-            Generate a cute 3D icon representing a ${type} (related to ${name}).
-            Style: High-quality 3D render, toy-like, clay material, soft studio lighting, bright colors, isolated on plain white background.
-            The object should look like a collectible miniature.
-            If the type is generic, create a 3D map pin or location marker.
-            Minimalist, single object.
-        `;
+        const prompt = `Cute 3D icon for ${type} (${name}), toy-like, bright colors, soft studio lighting, white background, single object.`;
 
         const cacheKey = buildCacheKey('attraction-image', 'gemini-2.5-flash-image-preview', prompt);
         if (!forceRefresh) {
@@ -381,7 +362,7 @@ export const generateAttractionImage = async (
 
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
-            buildImageRequest(prompt, 512),
+            buildImageRequest(prompt, 256),
             { maxAttempts: 0, timeoutMs: 25000 }
         );
         const image = extractImageUrl(response);
