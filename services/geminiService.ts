@@ -17,6 +17,56 @@ const initKey = () => {
 initKey();
 
 const GEMINI_BASE_URL = 'https://ai.juguang.chat/v1beta/models';
+const CACHE_PREFIX = 'gemini-cache:';
+
+const isBrowser = () => typeof window !== 'undefined';
+
+const toBase64 = (value: string) => {
+    if (!isBrowser() || typeof btoa === 'undefined') return value;
+    try {
+        return btoa(unescape(encodeURIComponent(value)));
+    } catch {
+        return value;
+    }
+};
+
+const buildCacheKey = (type: string, model: string, prompt: string) => {
+    const raw = `${type}|${model}|${prompt}`;
+    return `${CACHE_PREFIX}${toBase64(raw)}`;
+};
+
+const readCache = <T>(key: string): T | null => {
+    if (!isBrowser()) return null;
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed?.value ?? null;
+    } catch {
+        return null;
+    }
+};
+
+const writeCache = <T>(key: string, value: T) => {
+    if (!isBrowser()) return;
+    try {
+        localStorage.setItem(key, JSON.stringify({ value, ts: Date.now() }));
+    } catch {
+        // ignore cache write failures
+    }
+};
+
+export const clearGeminiCache = () => {
+    if (!isBrowser()) return;
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(CACHE_PREFIX)) {
+            keysToRemove.push(key);
+        }
+    }
+    keysToRemove.forEach((key) => localStorage.removeItem(key));
+};
 
 const buildTextRequest = (prompt: string, maxOutputTokens = 1024) => ({
     contents: [
@@ -87,21 +137,42 @@ const buildChatRequest = (
 });
 
 const fetchGemini = async (model: string, body: unknown) => {
-    const response = await fetch(`${GEMINI_BASE_URL}/${model}:generateContent`, {
-        method: 'POST',
-        headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(body)
-    });
+    const maxAttempts = 2;
+    let attempt = 0;
+    let lastError: Error | null = null;
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Gemini API error ${response.status}: ${errorText}`);
+    while (attempt <= maxAttempts) {
+        try {
+            const response = await fetch(`${GEMINI_BASE_URL}/${model}:generateContent`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                // Retry once on rate limits
+                if (response.status === 429 && attempt < maxAttempts) {
+                    await new Promise((resolve) => setTimeout(resolve, 1200));
+                    attempt += 1;
+                    continue;
+                }
+                throw new Error(`Gemini API error ${response.status}: ${errorText}`);
+            }
+
+            return response.json();
+        } catch (error: any) {
+            lastError = error;
+            if (attempt >= maxAttempts) break;
+            await new Promise((resolve) => setTimeout(resolve, 1200));
+            attempt += 1;
+        }
     }
 
-    return response.json();
+    throw lastError || new Error('Gemini API request failed.');
 };
 
 const extractText = (response: any) =>
@@ -143,7 +214,8 @@ export const setApiKey = (key: string) => {
 export const generateConciergeInfo = async (
   attractionName: string,
   city: string,
-  travelStyle: TravelStyle
+  travelStyle: TravelStyle,
+  forceRefresh = false
 ): Promise<string> => {
   if (!apiKey) return "Please configure your API Key to access AI insights.";
 
@@ -154,8 +226,15 @@ export const generateConciergeInfo = async (
       Tailor the tone for a ${travelStyle} traveler.
     `;
 
+    const cacheKey = buildCacheKey('concierge', 'gemini-2.0-flash-lite', prompt);
+    if (!forceRefresh) {
+        const cached = readCache<string>(cacheKey);
+        if (cached) return cached;
+    }
+
     const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 512));
     const text = extractText(response);
+    if (text) writeCache(cacheKey, text);
     return text || "Information unavailable at the moment.";
   } catch (error) {
     console.error("Gemini API Error:", error);
@@ -165,7 +244,8 @@ export const generateConciergeInfo = async (
 
 export const generateSouvenirCaption = async (
   location: string,
-  travelStyle: TravelStyle
+  travelStyle: TravelStyle,
+  forceRefresh = false
 ): Promise<string> => {
   if (!apiKey) return "To travel is to live.";
 
@@ -176,8 +256,15 @@ export const generateSouvenirCaption = async (
       Do not include quotes or attribution, just the text.
     `;
 
+    const cacheKey = buildCacheKey('souvenir-caption', 'gemini-2.0-flash-lite', prompt);
+    if (!forceRefresh) {
+        const cached = readCache<string>(cacheKey);
+        if (cached) return cached;
+    }
+
     const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 128));
     const text = extractText(response);
+    if (text) writeCache(cacheKey, text);
     return text?.trim() || "Memories made here.";
   } catch (error) {
     return "A moment in time.";
@@ -187,7 +274,8 @@ export const generateSouvenirCaption = async (
 export const generatePostcardImage = async (
     hotelName: string,
     location: string,
-    style: TravelStyle
+    style: TravelStyle,
+    forceRefresh = false
 ): Promise<string | null> => {
     if (!apiKey) return null;
 
@@ -199,11 +287,19 @@ export const generatePostcardImage = async (
             No text overlay.
         `;
 
+        const cacheKey = buildCacheKey('postcard-image', 'gemini-2.5-flash-image-preview', prompt);
+        if (!forceRefresh) {
+            const cached = readCache<string>(cacheKey);
+            if (cached) return cached;
+        }
+
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
             buildImageRequest(prompt, 1024)
         );
-        return extractImageUrl(response);
+        const image = extractImageUrl(response);
+        if (image) writeCache(cacheKey, image);
+        return image;
     } catch (error) {
         console.error("Postcard Gen Error:", error);
         return null;
@@ -226,11 +322,17 @@ export const generateAvatar = async (style: TravelStyle): Promise<string | null>
             Do not include complex backgrounds or dark moody lighting.
         `;
 
+        const cacheKey = buildCacheKey('avatar-image', 'gemini-2.5-flash-image-preview', prompt);
+        const cached = readCache<string>(cacheKey);
+        if (cached) return cached;
+
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
             buildImageRequest(prompt, 1024)
         );
-        return extractImageUrl(response);
+        const image = extractImageUrl(response);
+        if (image) writeCache(cacheKey, image);
+        return image;
     } catch (error) {
         console.error("Avatar Gen Error:", error);
         return null;
@@ -238,7 +340,11 @@ export const generateAvatar = async (style: TravelStyle): Promise<string | null>
 }
 
 // "Nano Banana" - Attraction 3D Asset Generation
-export const generateAttractionImage = async (type: string, name: string): Promise<string | null> => {
+export const generateAttractionImage = async (
+    type: string,
+    name: string,
+    forceRefresh = false
+): Promise<string | null> => {
     if (!apiKey) return null;
 
     try {
@@ -250,11 +356,19 @@ export const generateAttractionImage = async (type: string, name: string): Promi
             Minimalist, single object.
         `;
 
+        const cacheKey = buildCacheKey('attraction-image', 'gemini-2.5-flash-image-preview', prompt);
+        if (!forceRefresh) {
+            const cached = readCache<string>(cacheKey);
+            if (cached) return cached;
+        }
+
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
             buildImageRequest(prompt, 1024)
         );
-        return extractImageUrl(response);
+        const image = extractImageUrl(response);
+        if (image) writeCache(cacheKey, image);
+        return image;
     } catch (error) {
         console.error("Attraction Image Gen Error:", error);
         return null;
@@ -264,7 +378,8 @@ export const generateAttractionImage = async (type: string, name: string): Promi
 // NEW: Dynamic Attraction Generation (JSON)
 export const generateDynamicAttractions = async (
     location: string,
-    style: TravelStyle
+    style: TravelStyle,
+    forceRefresh = false
 ): Promise<Attraction[]> => {
     if (!apiKey) return [];
 
@@ -276,6 +391,12 @@ export const generateDynamicAttractions = async (
             For 'icon', suggest a valid Material Symbol name (snake_case) that represents the place (e.g. 'restaurant', 'park', 'museum', 'photo_camera').
         `;
 
+        const cacheKey = buildCacheKey('dynamic-attractions', 'gemini-2.0-flash-lite', prompt);
+        if (!forceRefresh) {
+            const cached = readCache<Attraction[]>(cacheKey);
+            if (cached) return cached;
+        }
+
         const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 1024));
         const text = extractText(response) || "{}";
         const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/\{[\s\S]*\}/);
@@ -283,7 +404,7 @@ export const generateDynamicAttractions = async (
         const list = json.attractions || [];
 
         // Map to internal Attraction interface
-        return list.map((item: any, index: number) => ({
+        const mapped = list.map((item: any, index: number) => ({
             id: 9000 + index + Math.floor(Math.random() * 1000), // Random ID to avoid collision
             name: item.name,
             type: item.type,
@@ -293,6 +414,8 @@ export const generateDynamicAttractions = async (
             coordinates: { top: '50%', left: '50%' }, // Dummy coordinates as we use iframe maps
             imageUrl: '' // Will be generated separately
         }));
+        writeCache(cacheKey, mapped);
+        return mapped;
 
     } catch (error) {
         console.error("Dynamic Attraction Gen Error:", error);
@@ -320,7 +443,8 @@ export const chatWithConcierge = async (
 
 export const generateItinerary = async (
     booking: Booking,
-    style: TravelStyle
+    style: TravelStyle,
+    forceRefresh = false
 ): Promise<string> => {
     if (!apiKey) return "Itinerary generation offline.";
 
@@ -334,8 +458,16 @@ export const generateItinerary = async (
             Keep it concise and exciting.
         `;
 
+        const cacheKey = buildCacheKey('itinerary', 'gemini-2.0-flash-lite', prompt);
+        if (!forceRefresh) {
+            const cached = readCache<string>(cacheKey);
+            if (cached) return cached;
+        }
+
         const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 1024));
-        return extractText(response) || "Could not generate itinerary.";
+        const text = extractText(response) || "Could not generate itinerary.";
+        if (text) writeCache(cacheKey, text);
+        return text;
     } catch (error) {
         return "Itinerary service momentarily unavailable.";
     }
