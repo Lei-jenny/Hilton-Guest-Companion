@@ -1,11 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import LoginStep from './components/LoginStep';
 import DashboardStep from './components/DashboardStep';
 import SouvenirStep from './components/SouvenirStep';
 import { UserSession, TripStatus } from './types';
+import { setApiKey } from './services/geminiService';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<UserSession | null>(null);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [apiKeySaved, setApiKeySaved] = useState(false);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('GEMINI_API_KEY') || '';
+    if (stored) {
+      setApiKeyInput(stored);
+      setApiKeySaved(true);
+      setApiKey(stored);
+    }
+  }, []);
 
   const handleLoginSuccess = (userSession: UserSession) => {
     setSession(userSession);
@@ -46,6 +58,39 @@ const App: React.FC = () => {
             src={session?.booking.backgroundImage || "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?q=80&w=2070&auto=format&fit=crop"} 
          />
          <div className="absolute inset-0 bg-black/40 mix-blend-overlay"></div>
+      </div>
+
+      <div className="absolute top-4 right-4 z-20 w-[92%] max-w-sm sm:w-auto">
+        <div className="bg-white/95 backdrop-blur-md border border-white/50 rounded-2xl p-4 shadow-lg">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-600">Gemini API Key</div>
+            <span className={`text-[10px] font-bold uppercase tracking-wider ${apiKeySaved ? 'text-green-600' : 'text-amber-600'}`}>
+              {apiKeySaved ? 'Saved' : 'Not set'}
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={apiKeyInput}
+              onChange={(e) => setApiKeyInput(e.target.value)}
+              placeholder="Paste your key here"
+              className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <button
+              onClick={() => {
+                const key = apiKeyInput.trim();
+                setApiKey(key);
+                setApiKeySaved(!!key);
+              }}
+              className="px-3 py-2 rounded-lg bg-slate-900 text-white text-xs font-bold"
+            >
+              Save
+            </button>
+          </div>
+          <div className="mt-2 text-[10px] text-slate-500">
+            Stored locally in your browser. Do not commit to GitHub.
+          </div>
+        </div>
       </div>
 
       {renderStep()}
