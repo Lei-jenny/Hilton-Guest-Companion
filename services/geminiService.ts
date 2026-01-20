@@ -72,6 +72,31 @@ const fetchGemini = async (model: string, body: unknown) => {
     return response.json();
 };
 
+const extractText = (response: any) =>
+    response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+const extractImageUrl = (response: any) => {
+    // Preferred inlineData
+    const parts = response?.candidates?.[0]?.content?.parts || [];
+    for (const part of parts) {
+        if (part?.inlineData?.data) {
+            const mimeType = part.inlineData.mimeType || 'image/png';
+            return `data:${mimeType};base64,${part.inlineData.data}`;
+        }
+    }
+
+    // Alternate response shapes seen in other endpoints
+    if (response?.image?.url) return response.image.url;
+    if (Array.isArray(response?.images) && response.images.length > 0) {
+        return response.images[0]?.url || response.images[0];
+    }
+    if (Array.isArray(response?.data) && response.data.length > 0) {
+        return response.data[0]?.url || response.data[0];
+    }
+
+    return null;
+};
+
 export const setApiKey = (key: string) => {
     apiKey = key.trim();
     if (typeof window !== 'undefined') {
@@ -98,7 +123,7 @@ export const generateConciergeInfo = async (
     `;
 
     const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 512));
-    const text = response?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const text = extractText(response);
     return text || "Information unavailable at the moment.";
   } catch (error) {
     console.error("Gemini API Error:", error);
@@ -120,7 +145,7 @@ export const generateSouvenirCaption = async (
     `;
 
     const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 128));
-    const text = response?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const text = extractText(response);
     return text?.trim() || "Memories made here.";
   } catch (error) {
     return "A moment in time.";
@@ -146,13 +171,7 @@ export const generatePostcardImage = async (
             'gemini-3.0-flash-image-preview',
             buildTextRequest(prompt, 1024)
         );
-
-        for (const part of response?.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData) {
-                return `data:image/png;base64,${part.inlineData.data}`;
-            }
-        }
-        return null;
+        return extractImageUrl(response);
     } catch (error) {
         console.error("Postcard Gen Error:", error);
         return null;
@@ -179,13 +198,7 @@ export const generateAvatar = async (style: TravelStyle): Promise<string | null>
             'gemini-3.0-flash-image-preview',
             buildTextRequest(prompt, 1024)
         );
-
-        for (const part of response?.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData) {
-                return `data:image/png;base64,${part.inlineData.data}`;
-            }
-        }
-        return null;
+        return extractImageUrl(response);
     } catch (error) {
         console.error("Avatar Gen Error:", error);
         return null;
@@ -209,13 +222,7 @@ export const generateAttractionImage = async (type: string, name: string): Promi
             'gemini-3.0-flash-image-preview',
             buildTextRequest(prompt, 1024)
         );
-
-        for (const part of response?.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData) {
-                return `data:image/png;base64,${part.inlineData.data}`;
-            }
-        }
-        return null;
+        return extractImageUrl(response);
     } catch (error) {
         console.error("Attraction Image Gen Error:", error);
         return null;
@@ -238,7 +245,7 @@ export const generateDynamicAttractions = async (
         `;
 
         const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 1024));
-        const text = response?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+        const text = extractText(response) || "{}";
         const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/\{[\s\S]*\}/);
         const json = JSON.parse(jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : text);
         const list = json.attractions || [];
@@ -272,7 +279,7 @@ export const chatWithConcierge = async (
         const systemPrompt = `You are a helpful, sophisticated hotel concierge at ${context}. Keep answers brief (under 50 words) and helpful.`;
         const prompt = `${systemPrompt}\n\nUser: ${message}`;
         const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 512));
-        return response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+        return extractText(response) || "";
     } catch (error) {
         console.error("Chat Error", error);
         return "I am having trouble connecting to the concierge network.";
@@ -296,7 +303,7 @@ export const generateItinerary = async (
         `;
 
         const response = await fetchGemini('gemini-2.0-flash-lite', buildTextRequest(prompt, 1024));
-        return response?.candidates?.[0]?.content?.parts?.[0]?.text || "Could not generate itinerary.";
+        return extractText(response) || "Could not generate itinerary.";
     } catch (error) {
         return "Itinerary service momentarily unavailable.";
     }
