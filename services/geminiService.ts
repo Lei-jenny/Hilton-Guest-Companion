@@ -136,27 +136,42 @@ const buildChatRequest = (
     }
 });
 
-const fetchGemini = async (model: string, body: unknown) => {
-    const maxAttempts = 2;
+const fetchGemini = async (
+    model: string,
+    body: unknown,
+    options?: {
+        maxAttempts?: number;
+        timeoutMs?: number;
+        retryDelayMs?: number;
+    }
+) => {
+    const maxAttempts = options?.maxAttempts ?? 2;
+    const timeoutMs = options?.timeoutMs ?? 30000;
+    const retryDelayMs = options?.retryDelayMs ?? 800;
     let attempt = 0;
     let lastError: Error | null = null;
 
     while (attempt <= maxAttempts) {
         try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
             const response = await fetch(`${GEMINI_BASE_URL}/${model}:generateContent`, {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(body)
+                body: JSON.stringify(body),
+                signal: controller.signal
             });
+            clearTimeout(timeoutId);
 
             if (!response.ok) {
                 const errorText = await response.text();
                 // Retry once on rate limits
                 if (response.status === 429 && attempt < maxAttempts) {
-                    await new Promise((resolve) => setTimeout(resolve, 1200));
+                    await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
                     attempt += 1;
                     continue;
                 }
@@ -167,7 +182,7 @@ const fetchGemini = async (model: string, body: unknown) => {
         } catch (error: any) {
             lastError = error;
             if (attempt >= maxAttempts) break;
-            await new Promise((resolve) => setTimeout(resolve, 1200));
+            await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
             attempt += 1;
         }
     }
@@ -295,7 +310,8 @@ export const generatePostcardImage = async (
 
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
-            buildImageRequest(prompt, 1024)
+            buildImageRequest(prompt, 512),
+            { maxAttempts: 0, timeoutMs: 25000 }
         );
         const image = extractImageUrl(response);
         if (image) writeCache(cacheKey, image);
@@ -328,7 +344,8 @@ export const generateAvatar = async (style: TravelStyle): Promise<string | null>
 
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
-            buildImageRequest(prompt, 1024)
+            buildImageRequest(prompt, 512),
+            { maxAttempts: 0, timeoutMs: 25000 }
         );
         const image = extractImageUrl(response);
         if (image) writeCache(cacheKey, image);
@@ -364,7 +381,8 @@ export const generateAttractionImage = async (
 
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
-            buildImageRequest(prompt, 1024)
+            buildImageRequest(prompt, 512),
+            { maxAttempts: 0, timeoutMs: 25000 }
         );
         const image = extractImageUrl(response);
         if (image) writeCache(cacheKey, image);
