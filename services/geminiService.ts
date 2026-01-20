@@ -1,8 +1,34 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { TravelStyle, Booking, Attraction } from "../types";
 
-const apiKey = process.env.API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+let apiKey = process.env.API_KEY || '';
+
+const getStoredKey = () => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem('GEMINI_API_KEY') || '';
+};
+
+const initKey = () => {
+    const stored = getStoredKey();
+    if (stored) {
+        apiKey = stored;
+    }
+};
+
+initKey();
+
+const getClient = () => new GoogleGenAI({ apiKey });
+
+export const setApiKey = (key: string) => {
+    apiKey = key.trim();
+    if (typeof window !== 'undefined') {
+        if (apiKey) {
+            localStorage.setItem('GEMINI_API_KEY', apiKey);
+        } else {
+            localStorage.removeItem('GEMINI_API_KEY');
+        }
+    }
+};
 
 export const generateConciergeInfo = async (
   attractionName: string,
@@ -18,7 +44,7 @@ export const generateConciergeInfo = async (
       Tailor the tone for a ${travelStyle} traveler.
     `;
 
-    const response = await ai.models.generateContent({
+    const response = await getClient().models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
     });
@@ -43,7 +69,7 @@ export const generateSouvenirCaption = async (
       Do not include quotes or attribution, just the text.
     `;
 
-    const response = await ai.models.generateContent({
+    const response = await getClient().models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
     });
@@ -69,7 +95,7 @@ export const generatePostcardImage = async (
             No text overlay.
         `;
 
-        const response = await ai.models.generateContent({
+        const response = await getClient().models.generateContent({
             model: 'gemini-2.5-flash-image',
             contents: {
                 parts: [
@@ -106,7 +132,7 @@ export const generateAvatar = async (style: TravelStyle): Promise<string | null>
             Do not include complex backgrounds or dark moody lighting.
         `;
 
-        const response = await ai.models.generateContent({
+        const response = await getClient().models.generateContent({
             model: 'gemini-2.5-flash-image',
             contents: {
                 parts: [
@@ -140,7 +166,7 @@ export const generateAttractionImage = async (type: string, name: string): Promi
             Minimalist, single object.
         `;
 
-        const response = await ai.models.generateContent({
+        const response = await getClient().models.generateContent({
             model: 'gemini-2.5-flash-image',
             contents: {
                 parts: [
@@ -176,7 +202,7 @@ export const generateDynamicAttractions = async (
             For 'icon', suggest a valid Material Symbol name (snake_case) that represents the place (e.g. 'restaurant', 'park', 'museum', 'photo_camera').
         `;
 
-        const response = await ai.models.generateContent({
+        const response = await getClient().models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,
             config: {
@@ -231,7 +257,7 @@ export const chatWithConcierge = async (
     if (!apiKey) return "System offline.";
 
     try {
-        const chat = ai.chats.create({
+        const chat = getClient().chats.create({
             model: 'gemini-3-flash-preview',
             history: history,
             config: {
@@ -263,7 +289,7 @@ export const generateItinerary = async (
             Keep it concise and exciting.
         `;
 
-        const response = await ai.models.generateContent({
+        const response = await getClient().models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,
         });
