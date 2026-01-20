@@ -11,6 +11,7 @@ const App: React.FC = () => {
   const [apiKeySaved, setApiKeySaved] = useState(false);
   const [cacheCleared, setCacheCleared] = useState(false);
   const [isKeyPanelOpen, setIsKeyPanelOpen] = useState(false);
+  const [isCachePanelOpen, setIsCachePanelOpen] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem('GEMINI_API_KEY') || '';
@@ -103,20 +104,6 @@ const App: React.FC = () => {
                 Save
               </button>
             </div>
-            <div className="mt-2 flex items-center justify-between">
-              <button
-                onClick={() => {
-                  clearGeminiCache();
-                  setCacheCleared(true);
-                }}
-                className="text-[10px] text-slate-600 underline"
-              >
-                Refresh AI results
-              </button>
-              {cacheCleared && (
-                <span className="text-[10px] text-green-600 font-semibold">Cleared</span>
-              )}
-            </div>
             <div className="mt-2 text-[10px] text-slate-500">
               Stored locally in your browser. Do not commit to GitHub.
             </div>
@@ -130,6 +117,42 @@ const App: React.FC = () => {
             <span className={apiKeySaved ? 'text-green-600' : 'text-amber-600'}>
               {apiKeySaved ? 'Saved' : 'Not set'}
             </span>
+          </button>
+        )}
+      </div>
+
+      <div className="absolute bottom-4 right-4 z-20">
+        {isCachePanelOpen ? (
+          <div className="bg-white/90 backdrop-blur-md border border-white/50 rounded-2xl p-3 shadow-lg">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-600">AI Cache</div>
+              <button
+                onClick={() => setIsCachePanelOpen(false)}
+                className="text-[10px] font-bold uppercase tracking-wider text-slate-500"
+              >
+                Close
+              </button>
+            </div>
+            <button
+              onClick={() => {
+                clearGeminiCache();
+                setCacheCleared(true);
+              }}
+              className="text-[11px] font-bold text-slate-700 underline"
+            >
+              Clear cache
+            </button>
+            {cacheCleared && (
+              <div className="mt-1 text-[10px] text-green-600 font-semibold">Cleared</div>
+            )}
+          </div>
+        ) : (
+          <button
+            onClick={() => setIsCachePanelOpen(true)}
+            className="bg-white/80 backdrop-blur-md border border-white/50 rounded-full w-9 h-9 shadow-lg text-slate-600 flex items-center justify-center"
+            title="AI Cache"
+          >
+            <span className="material-symbols-outlined text-base">tune</span>
           </button>
         )}
       </div>
