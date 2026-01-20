@@ -318,7 +318,10 @@ export const generatePostcardImage = async (
 }
 
 // "Nano Banana" - Avatar Generation
-export const generateAvatar = async (style: TravelStyle): Promise<string | null> => {
+export const generateAvatar = async (
+    style: TravelStyle,
+    forceRefresh = false
+): Promise<string | null> => {
     if (!apiKey) return null;
 
     try {
@@ -326,8 +329,10 @@ export const generateAvatar = async (style: TravelStyle): Promise<string | null>
         const prompt = `Cute 3D traveler avatar, ${style} style, bright studio lighting, clean white background, centered headshot.`;
 
         const cacheKey = buildCacheKey('avatar-image', 'gemini-2.5-flash-image-preview', prompt);
-        const cached = readCache<string>(cacheKey);
-        if (cached) return cached;
+        if (!forceRefresh) {
+            const cached = readCache<string>(cacheKey);
+            if (cached) return cached;
+        }
 
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
