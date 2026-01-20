@@ -1,0 +1,6 @@
+{
+  "framework": "vite",
+  "installCommand": "cd hilton-guest-companion && npm install",
+  "buildCommand": "cd hilton-guest-companion && npm run build",
+  "outputDirectory": "hilton-guest-companion/dist"
+}
