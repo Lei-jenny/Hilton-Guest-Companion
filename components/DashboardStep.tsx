@@ -87,15 +87,25 @@ const DashboardStep: React.FC<DashboardStepProps> = ({ session }) => {
     if (attractions.length === 0) return;
 
     const fetchImages = async () => {
-        for (const attr of attractions) {
-            // If we already generated or have a URL, skip
-            if (generatedImages[attr.id] || attr.imageUrl) continue;
+        const targets = attractions.filter((attr) => !generatedImages[attr.id] && !attr.imageUrl);
+        if (targets.length === 0) return;
 
-            const img = await generateAttractionImage(attr.type, attr.name);
-            if (img) {
-                setGeneratedImages(prev => ({...prev, [attr.id]: img}));
+        // Limit concurrency to avoid rate limits but speed up overall generation
+        const concurrency = 2;
+        let index = 0;
+
+        const worker = async () => {
+            while (index < targets.length) {
+                const current = targets[index];
+                index += 1;
+                const img = await generateAttractionImage(current.type, current.name);
+                if (img) {
+                    setGeneratedImages(prev => ({ ...prev, [current.id]: img }));
+                }
             }
-        }
+        };
+
+        await Promise.all(Array.from({ length: Math.min(concurrency, targets.length) }, worker));
     };
     fetchImages();
   }, [attractions]);
