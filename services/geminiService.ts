@@ -168,7 +168,7 @@ export const generatePostcardImage = async (
         `;
 
         const response = await fetchGemini(
-            'gemini-3.0-flash-image-preview',
+            'gemini-3.0-pro-image-preview',
             buildTextRequest(prompt, 1024)
         );
         return extractImageUrl(response);
@@ -195,7 +195,7 @@ export const generateAvatar = async (style: TravelStyle): Promise<string | null>
         `;
 
         const response = await fetchGemini(
-            'gemini-3.0-flash-image-preview',
+            'gemini-3.0-pro-image-preview',
             buildTextRequest(prompt, 1024)
         );
         return extractImageUrl(response);
@@ -219,7 +219,7 @@ export const generateAttractionImage = async (type: string, name: string): Promi
         `;
 
         const response = await fetchGemini(
-            'gemini-3.0-flash-image-preview',
+            'gemini-3.0-pro-image-preview',
             buildTextRequest(prompt, 1024)
         );
         return extractImageUrl(response);
