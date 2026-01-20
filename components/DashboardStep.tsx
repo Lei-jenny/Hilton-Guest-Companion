@@ -91,7 +91,7 @@ const DashboardStep: React.FC<DashboardStepProps> = ({ session }) => {
         if (targets.length === 0) return;
 
         // Limit concurrency to avoid rate limits but speed up overall generation
-        const concurrency = 2;
+        const concurrency = 3;
         let index = 0;
 
         const worker = async () => {
