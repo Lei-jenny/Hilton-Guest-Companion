@@ -32,6 +32,38 @@ const buildTextRequest = (prompt: string, maxOutputTokens = 1024) => ({
     }
 });
 
+const buildImageRequest = (prompt: string, maxOutputTokens = 1024) => ({
+    contents: [
+        {
+            parts: [{ text: prompt }]
+        }
+    ],
+    generationConfig: {
+        temperature: 0.7,
+        topK: 20,
+        topP: 0.8,
+        maxOutputTokens
+    },
+    safetySettings: [
+        {
+            category: "HARM_CATEGORY_HARASSMENT",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+        },
+        {
+            category: "HARM_CATEGORY_HATE_SPEECH",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+        },
+        {
+            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+        },
+        {
+            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+            threshold: "BLOCK_MEDIUM_AND_ABOVE"
+        }
+    ]
+});
+
 const buildChatRequest = (
     history: { role: string; parts: { text: string }[] }[],
     message: string
@@ -169,7 +201,7 @@ export const generatePostcardImage = async (
 
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
-            buildTextRequest(prompt, 1024)
+            buildImageRequest(prompt, 1024)
         );
         return extractImageUrl(response);
     } catch (error) {
@@ -196,7 +228,7 @@ export const generateAvatar = async (style: TravelStyle): Promise<string | null>
 
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
-            buildTextRequest(prompt, 1024)
+            buildImageRequest(prompt, 1024)
         );
         return extractImageUrl(response);
     } catch (error) {
@@ -220,7 +252,7 @@ export const generateAttractionImage = async (type: string, name: string): Promi
 
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
-            buildTextRequest(prompt, 1024)
+            buildImageRequest(prompt, 1024)
         );
         return extractImageUrl(response);
     } catch (error) {
