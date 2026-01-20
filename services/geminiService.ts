@@ -215,6 +215,32 @@ const extractImageUrl = (response: any) => {
     return null;
 };
 
+const buildPlaceholderDataUrl = (label: string) => {
+    const safeLabel = label.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const svg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+          <defs>
+            <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="100%" stop-color="#f1f5f9"/>
+            </linearGradient>
+          </defs>
+          <rect width="512" height="512" rx="72" fill="url(#bg)"/>
+          <rect x="56" y="56" width="400" height="400" rx="56" fill="#ffffff" stroke="#e2e8f0" stroke-width="8"/>
+          <text x="256" y="250" text-anchor="middle" font-family="Manrope, Arial, sans-serif" font-size="20" fill="#64748b">
+            Generating
+          </text>
+          <text x="256" y="285" text-anchor="middle" font-family="Manrope, Arial, sans-serif" font-size="16" fill="#94a3b8">
+            ${safeLabel}
+          </text>
+        </svg>
+    `;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+};
+
+export const getAttractionPlaceholder = (type: string, name: string) =>
+    buildPlaceholderDataUrl(`${name}`);
+
 export const setApiKey = (key: string) => {
     apiKey = key.trim();
     if (typeof window !== 'undefined') {
@@ -337,7 +363,7 @@ export const generateAvatar = async (
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
             buildImageRequest(prompt, 256),
-            { maxAttempts: 1, timeoutMs: 25000, retryDelayMs: 700 }
+            { maxAttempts: 0, timeoutMs: 20000 }
         );
         const image = extractImageUrl(response);
         if (image) writeCache(cacheKey, image);
@@ -368,7 +394,7 @@ export const generateAttractionImage = async (
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
             buildImageRequest(prompt, 256),
-            { maxAttempts: 0, timeoutMs: 25000 }
+            { maxAttempts: 0, timeoutMs: 10000 }
         );
         const image = extractImageUrl(response);
         if (image) writeCache(cacheKey, image);
