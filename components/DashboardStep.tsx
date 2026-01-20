@@ -212,7 +212,10 @@ const DashboardStep: React.FC<DashboardStepProps> = ({ session }) => {
       }
 
       return (
-         <div className="w-20 h-20 rounded-xl bg-white bg-cover bg-center shrink-0 shadow-inner border border-gray-100" style={{ backgroundImage: `url(${img})` }}></div>
+         <div
+            className="w-20 h-20 rounded-xl bg-white bg-cover bg-center shrink-0 shadow-inner border border-gray-100"
+            style={{ backgroundImage: `url("${img}")` }}
+         ></div>
       );
   };
 
