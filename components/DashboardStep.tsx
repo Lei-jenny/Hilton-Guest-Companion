@@ -87,15 +87,15 @@ const DashboardStep: React.FC<DashboardStepProps> = ({ session }) => {
     if (attractions.length === 0) return;
 
     const fetchImages = async () => {
-        attractions.forEach(async (attr) => {
-             // If we already generated or have a URL, skip
-             if (generatedImages[attr.id] || attr.imageUrl) return;
+        for (const attr of attractions) {
+            // If we already generated or have a URL, skip
+            if (generatedImages[attr.id] || attr.imageUrl) continue;
 
-             const img = await generateAttractionImage(attr.type, attr.name);
-             if (img) {
-                 setGeneratedImages(prev => ({...prev, [attr.id]: img}));
-             }
-        });
+            const img = await generateAttractionImage(attr.type, attr.name);
+            if (img) {
+                setGeneratedImages(prev => ({...prev, [attr.id]: img}));
+            }
+        }
     };
     fetchImages();
   }, [attractions]);
