@@ -337,7 +337,7 @@ export const generateAvatar = async (
         const response = await fetchGemini(
             'gemini-2.5-flash-image-preview',
             buildImageRequest(prompt, 256),
-            { maxAttempts: 0, timeoutMs: 25000 }
+            { maxAttempts: 1, timeoutMs: 25000, retryDelayMs: 700 }
         );
         const image = extractImageUrl(response);
         if (image) writeCache(cacheKey, image);
