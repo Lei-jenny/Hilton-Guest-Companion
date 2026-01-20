@@ -1,400 +1,301 @@
-export default async function handler(req, res) {
-    // 设置CORS头
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    
-    // 处理预检请求
-    if (req.method === 'OPTIONS') {
-        res.status(200).end();
-        return;
+import { GoogleGenAI, Type } from "@google/genai";
+import { TravelStyle, Booking, Attraction } from "../types";
+
+let apiKey = process.env.API_KEY || '';
+
+const getStoredKey = () => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem('GEMINI_API_KEY') || '';
+};
+
+const initKey = () => {
+    const stored = getStoredKey();
+    if (stored) {
+        apiKey = stored;
     }
-    
-    // 只允许POST请求
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method not allowed' });
+};
+
+initKey();
+
+const getClient = () => new GoogleGenAI({ apiKey });
+
+export const setApiKey = (key: string) => {
+    apiKey = key.trim();
+    if (typeof window !== 'undefined') {
+        if (apiKey) {
+            localStorage.setItem('GEMINI_API_KEY', apiKey);
+        } else {
+            localStorage.removeItem('GEMINI_API_KEY');
+        }
     }
-    
+};
+
+export const generateConciergeInfo = async (
+  attractionName: string,
+  city: string,
+  travelStyle: TravelStyle
+): Promise<string> => {
+  if (!apiKey) return "Please configure your API Key to access AI insights.";
+
+  try {
+    const prompt = `
+      Act as a luxury hotel concierge. 
+      Write a short, engaging 2-sentence cultural fact or tip about ${attractionName} in ${city}.
+      Tailor the tone for a ${travelStyle} traveler.
+    `;
+
+    const response = await getClient().models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+    });
+
+    return response.text || "Information unavailable at the moment.";
+  } catch (error) {
+    console.error("Gemini API Error:", error);
+    return "Our concierge service is momentarily unavailable.";
+  }
+};
+
+export const generateSouvenirCaption = async (
+  location: string,
+  travelStyle: TravelStyle
+): Promise<string> => {
+  if (!apiKey) return "To travel is to live.";
+
+  try {
+    const prompt = `
+      Generate a short, inspiring travel quote (max 10 words) for a postcard from ${location}.
+      The vibe should be ${travelStyle}. 
+      Do not include quotes or attribution, just the text.
+    `;
+
+    const response = await getClient().models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: prompt,
+    });
+
+    return response.text?.trim() || "Memories made here.";
+  } catch (error) {
+    return "A moment in time.";
+  }
+};
+
+export const generatePostcardImage = async (
+    hotelName: string,
+    location: string,
+    style: TravelStyle
+): Promise<string | null> => {
+    if (!apiKey) return null;
+
     try {
-        // 生成唯一的请求ID来跟踪多次调用
-        const requestId = Math.random().toString(36).substring(2, 15);
-        
-        console.log('=== New Image Generation Request ===');
-        console.log('Request ID:', requestId);
-        console.log('Timestamp:', new Date().toISOString());
-        console.log('Received request:', req.body);
-        
-        const { prompt, description, model, size, quality, style, n } = req.body;
-        
-        if (!prompt) {
-            return res.status(400).json({ error: 'Prompt is required' });
-        }
-        
-        console.log(`[${requestId}] Generating image with prompt:`, prompt);
-        console.log(`[${requestId}] Description:`, description);
-        console.log(`[${requestId}] Request body:`, JSON.stringify(req.body, null, 2));
-        
-        // 使用Gemini API生成图片
-        console.log(`[${requestId}] Using Gemini API for image generation`);
-        
-        // 构建图片生成prompt，包含菜品描述以提高准确性
-        let imagePrompt = `Generate a high-quality food image of: ${prompt}`;
-        
-        // 如果有描述，添加到prompt中帮助AI理解菜品
-        if (description && description.trim()) {
-            imagePrompt += `. Description: ${description}`;
-        }
-        
-        console.log(`[${requestId}] 构建的图片生成prompt:`, imagePrompt);
-        
-        // 使用Gemini 2.5 Flash Image Preview API
-        const requestBody = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": imagePrompt
-                        }
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.7,
-                "topK": 20,
-                "topP": 0.8,
-                "maxOutputTokens": 1024
+        const prompt = `
+            A beautiful, artistic travel poster illustration of ${hotelName} in ${location}.
+            Style: ${style} vibe, high-end digital art, warm lighting, scenic view. 
+            The image should look like a premium collectible postcard.
+            No text overlay.
+        `;
+
+        const response = await getClient().models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: {
+                parts: [
+                    { text: prompt }
+                ]
             },
-            "safetySettings": [
-                {
-                    "category": "HARM_CATEGORY_HARASSMENT",
-                    "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                },
-                {
-                    "category": "HARM_CATEGORY_HATE_SPEECH",
-                    "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                },
-                {
-                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                    "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                },
-                {
-                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                    "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-                }
-            ]
-        };
-        
-        console.log(`[${requestId}] Gemini API request body:`, JSON.stringify(requestBody, null, 2));
-        
-        let geminiResponse;
-        try {
-            console.log(`[${requestId}] Making request to Gemini API...`);
-            
-            // 创建AbortController用于超时控制
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60秒超时
-            
-            // 使用图片生成模型
-            geminiResponse = await fetch('https://ai.juguang.chat/v1beta/models/gemini-3.0-flash-image-preview:generateContent', {
-                method: 'POST',
-                headers: {
-                    'Authorization': 'Bearer sk-o4mIilLIlhQurOQ8TE1DhtCQYk7m4Q8sR0foh2JCvYzuDfHX',
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(requestBody),
-                signal: controller.signal
-            });
-            
-            clearTimeout(timeoutId);
-            console.log(`[${requestId}] Gemini API request completed, status:`, geminiResponse.status);
-            
-            // 如果是429错误，等待一段时间后重试一次
-            if (geminiResponse.status === 429) {
-                console.log(`[${requestId}] Rate limit hit, waiting 2 seconds before retry...`);
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                
-                console.log(`[${requestId}] Retrying Gemini API request...`);
-                const retryController = new AbortController();
-                const retryTimeoutId = setTimeout(() => retryController.abort(), 60000);
-                
-                geminiResponse = await fetch('https://ai.juguang.chat/v1beta/models/gemini-2.5-flash-image-preview:generateContent', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': 'Bearer sk-o4mIilLIlhQurOQ8TE1DhtCQYk7m4Q8sR0foh2JCvYzuDfHX',
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(requestBody),
-                    signal: retryController.signal
-                });
-                
-                clearTimeout(retryTimeoutId);
-                console.log(`[${requestId}] Gemini API retry completed, status:`, geminiResponse.status);
-            }
-        } catch (fetchError) {
-            console.error('Gemini API fetch error:', fetchError);
-            console.log('Gemini API failed due to fetch error, using Unsplash as fallback');
-            
-            // 直接使用Unsplash作为备用
-            const unsplashResponse = await fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(prompt)}&per_page=3&orientation=landscape&order_by=relevant&client_id=YRtZM4GfSkIrBBbFBFlrDO98J91yjUBEhgxRx1yblA4`);
-            
-            if (unsplashResponse.ok) {
-                const unsplashResult = await unsplashResponse.json();
-                if (unsplashResult.results && unsplashResult.results.length > 0) {
-                    const imageUrl = unsplashResult.results[0].urls.regular;
-                    return res.status(200).json({
-                        success: true,
-                        data: [{
-                            url: imageUrl,
-                            alt: unsplashResult.results[0].alt_description || prompt
-                        }],
-                        prompt: prompt,
-                        source: 'unsplash_fallback'
-                    });
-                }
-            }
-            
-            return res.status(500).json({ 
-                error: `Gemini API fetch failed: ${fetchError.message}` 
-            });
-        }
-        
-        console.log('Gemini API response status:', geminiResponse.status);
-        console.log('Gemini API response headers:', Object.fromEntries(geminiResponse.headers.entries()));
-        
-        if (!geminiResponse.ok) {
-            const errorText = await geminiResponse.text();
-            console.error(`[${requestId}] Gemini API error:`, geminiResponse.status, errorText);
-            console.error(`[${requestId}] Gemini API error details:`, {
-                status: geminiResponse.status,
-                statusText: geminiResponse.statusText,
-                headers: Object.fromEntries(geminiResponse.headers.entries()),
-                body: errorText
-            });
-            
-            // 检查是否是配额超限错误
-            if (geminiResponse.status === 429) {
-                console.log(`[${requestId}] Gemini API quota exceeded, using Unsplash as fallback`);
-                console.log(`[${requestId}] Error message: You exceeded your current quota, please check your plan and billing details`);
-            } else {
-                console.log(`[${requestId}] Gemini API failed with status ${geminiResponse.status}, using Unsplash as fallback`);
-            }
-            const unsplashResponse = await fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(prompt)}&per_page=3&orientation=landscape&order_by=relevant&client_id=YRtZM4GfSkIrBBbFBFlrDO98J91yjUBEhgxRx1yblA4`);
-            
-            if (unsplashResponse.ok) {
-                const unsplashResult = await unsplashResponse.json();
-                if (unsplashResult.results && unsplashResult.results.length > 0) {
-                    const imageUrl = unsplashResult.results[0].urls.regular;
-                    return res.status(200).json({
-                        success: true,
-                        data: [{
-                            url: imageUrl,
-                            alt: unsplashResult.results[0].alt_description || prompt
-                        }],
-                        prompt: prompt,
-                        source: 'unsplash_fallback'
-                    });
-                }
-            }
-            
-            return res.status(geminiResponse.status).json({ 
-                error: `Gemini API error: ${geminiResponse.status} - ${errorText}` 
-            });
-        }
-        
-        const result = await geminiResponse.json();
-        console.log(`[${requestId}] Gemini API response:`, JSON.stringify(result, null, 2));
-        
-        // 检查Gemini API响应的实际结构
-        console.log(`[${requestId}] Checking Gemini response structure...`);
-        console.log(`[${requestId}] Has candidates:`, !!result.candidates);
-        console.log(`[${requestId}] Candidates length:`, result.candidates ? result.candidates.length : 0);
-        console.log(`[${requestId}] Response keys:`, Object.keys(result));
-        
-        // 检查是否有finishReason字段，这可能表明生成状态
-        if (result.candidates && result.candidates.length > 0) {
-            const candidate = result.candidates[0];
-            console.log(`[${requestId}] Candidate finishReason:`, candidate.finishReason);
-            console.log(`[${requestId}] Candidate safetyRatings:`, candidate.safetyRatings);
-            
-            // 检查是否因为安全原因被阻止
-            if (candidate.finishReason === 'SAFETY') {
-                console.log(`[${requestId}] Gemini API blocked due to safety concerns`);
-                console.log(`[${requestId}] Safety ratings:`, candidate.safetyRatings);
-            }
-            
-            // 检查是否因为其他原因被阻止
-            if (candidate.finishReason === 'RECITATION') {
-                console.log(`[${requestId}] Gemini API blocked due to recitation concerns`);
-            }
-            
-            if (candidate.finishReason === 'OTHER') {
-                console.log(`[${requestId}] Gemini API blocked for other reasons`);
+        });
+
+        for (const part of response.candidates[0].content.parts) {
+            if (part.inlineData) {
+                return `data:image/png;base64,${part.inlineData.data}`;
             }
         }
-        
-        // 首先检查是否有直接的图片URL
-        if (result.images && Array.isArray(result.images) && result.images.length > 0) {
-            console.log(`[${requestId}] Found images in result.images:`, result.images);
-            return res.status(200).json({
-                success: true,
-                data: result.images.map(img => ({
-                    url: img.url || img,
-                    alt: prompt
-                })),
-                prompt: prompt,
-                source: 'gemini_direct'
-            });
-        }
-        
-        // 检查是否有其他直接的图片字段
-        if (result.image && result.image.url) {
-            console.log(`[${requestId}] Found image in result.image:`, result.image);
-            return res.status(200).json({
-                success: true,
-                data: [{
-                    url: result.image.url,
-                    alt: prompt
-                }],
-                prompt: prompt,
-                source: 'gemini_single'
-            });
-        }
-        
-        if (result.candidates && result.candidates.length > 0) {
-            const candidate = result.candidates[0];
-            console.log('First candidate:', JSON.stringify(candidate, null, 2));
-            
-            if (candidate.content && candidate.content.parts) {
-                console.log('Content parts length:', candidate.content.parts.length);
-                
-                for (let i = 0; i < candidate.content.parts.length; i++) {
-                    const part = candidate.content.parts[i];
-                    console.log(`Part ${i}:`, JSON.stringify(part, null, 2));
-                    
-                    if (part.inlineData && part.inlineData.data) {
-                        // Gemini返回的是base64编码的图片数据
-                        const imageData = part.inlineData.data;
-                        const mimeType = part.inlineData.mimeType || 'image/jpeg';
-                        
-                        console.log('Gemini API returned image data, mimeType:', mimeType);
-                        console.log('Image data length:', imageData ? imageData.length : 0);
-                        
-                        return res.status(200).json({
-                            success: true,
-                            data: [{
-                                url: `data:${mimeType};base64,${imageData}`,
-                                alt: prompt
-                            }],
-                            prompt: prompt,
-                            source: 'gemini'
-                        });
-                    }
-                }
+        return null;
+    } catch (error) {
+        console.error("Postcard Gen Error:", error);
+        return null;
+    }
+}
+
+// "Nano Banana" - Avatar Generation
+export const generateAvatar = async (style: TravelStyle): Promise<string | null> => {
+    if (!apiKey) return null;
+
+    try {
+        // Updated prompt for cleaner, brighter, preset-matching style
+        const prompt = `
+            Generate a 3D icon of a cute traveler avatar.
+            Style: Pixar/Disney 3D animation style.
+            Lighting: Bright studio lighting, soft shadows.
+            Background: Plain white or very soft light gray background (clean).
+            Character: ${style} traveler, friendly expression, vibrant colors.
+            Composition: Centered headshot icon. 
+            Do not include complex backgrounds or dark moody lighting.
+        `;
+
+        const response = await getClient().models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: {
+                parts: [
+                    { text: prompt }
+                ]
+            },
+        });
+
+        for (const part of response.candidates[0].content.parts) {
+            if (part.inlineData) {
+                return `data:image/png;base64,${part.inlineData.data}`;
             }
         }
-        
-        // 尝试其他可能的响应结构
-        console.log('Trying alternative response structures...');
-        
-        // 检查是否有直接的图片URL
-        if (result.images && result.images.length > 0) {
-            console.log('Found images in result.images');
-            return res.status(200).json({
-                success: true,
-                data: result.images.map(img => ({
-                    url: img.url || img,
-                    alt: prompt
-                })),
-                prompt: prompt,
-                source: 'gemini_alternative'
-            });
+        return null;
+    } catch (error) {
+        console.error("Avatar Gen Error:", error);
+        return null;
+    }
+}
+
+// "Nano Banana" - Attraction 3D Asset Generation
+export const generateAttractionImage = async (type: string, name: string): Promise<string | null> => {
+    if (!apiKey) return null;
+
+    try {
+        const prompt = `
+            Generate a cute 3D icon representing a ${type} (related to ${name}).
+            Style: High-quality 3D render, toy-like, clay material, soft studio lighting, bright colors, isolated on plain white background.
+            The object should look like a collectible miniature.
+            If the type is generic, create a 3D map pin or location marker.
+            Minimalist, single object.
+        `;
+
+        const response = await getClient().models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: {
+                parts: [
+                    { text: prompt }
+                ]
+            },
+        });
+
+        for (const part of response.candidates[0].content.parts) {
+            if (part.inlineData) {
+                return `data:image/png;base64,${part.inlineData.data}`;
+            }
         }
-        
-        // 检查是否有其他结构
-        if (result.data && result.data.length > 0) {
-            console.log('Found images in result.data');
-            return res.status(200).json({
-                success: true,
-                data: result.data.map(img => ({
-                    url: img.url || img,
-                    alt: prompt
-                })),
-                prompt: prompt,
-                source: 'gemini_data'
-            });
-        }
-        
-        // 检查是否有文本描述（可能Gemini返回的是文本而不是图片）
-        if (result.candidates && result.candidates.length > 0) {
-            const candidate = result.candidates[0];
-            if (candidate.content && candidate.content.parts) {
-                for (const part of candidate.content.parts) {
-                    if (part.text) {
-                        console.log(`[${requestId}] Gemini returned text instead of image:`, part.text);
-                        // 如果返回的是文本描述，我们可以使用这个描述来搜索Unsplash
-                        const searchQuery = part.text.substring(0, 100); // 限制长度
-                        console.log(`[${requestId}] Using Gemini text description for Unsplash search:`, searchQuery);
-                        
-                        const unsplashResponse = await fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(searchQuery)}&per_page=3&orientation=landscape&order_by=relevant&client_id=YRtZM4GfSkIrBBbFBFlrDO98J91yjUBEhgxRx1yblA4`);
-                        
-                        if (unsplashResponse.ok) {
-                            const unsplashResult = await unsplashResponse.json();
-                            if (unsplashResult.results && unsplashResult.results.length > 0) {
-                                const imageUrl = unsplashResult.results[0].urls.regular;
-                                return res.status(200).json({
-                                    success: true,
-                                    data: [{
-                                        url: imageUrl,
-                                        alt: part.text.substring(0, 100)
-                                    }],
-                                    prompt: prompt,
-                                    source: 'unsplash_with_gemini_description'
-                                });
+        return null;
+    } catch (error) {
+        console.error("Attraction Image Gen Error:", error);
+        return null;
+    }
+}
+
+// NEW: Dynamic Attraction Generation (JSON)
+export const generateDynamicAttractions = async (
+    location: string,
+    style: TravelStyle
+): Promise<Attraction[]> => {
+    if (!apiKey) return [];
+
+    try {
+        const prompt = `
+            Identify 3 "Nearby" hidden gems/activities and 3 "Must-See" famous landmarks in ${location}.
+            Target Audience: ${style} traveler.
+            Return a JSON object with a list of attractions.
+            For 'icon', suggest a valid Material Symbol name (snake_case) that represents the place (e.g. 'restaurant', 'park', 'museum', 'photo_camera').
+        `;
+
+        const response = await getClient().models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        attractions: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    name: { type: Type.STRING },
+                                    type: { type: Type.STRING, description: "Short type e.g. Cafe, Park, Temple" },
+                                    category: { type: Type.STRING, enum: ["Nearby", "Must-See"] },
+                                    description: { type: Type.STRING, description: "Short engaging description, max 10 words" },
+                                    icon: { type: Type.STRING, description: "Material Symbol name" }
+                                }
                             }
                         }
                     }
                 }
             }
-        }
-        
-        // 如果没有找到图片数据，使用Unsplash作为备用
-        console.log(`[${requestId}] Gemini API did not return image data in expected format, using Unsplash as fallback`);
-        console.log(`[${requestId}] Full response structure for debugging:`, {
-            hasCandidates: !!result.candidates,
-            candidatesLength: result.candidates ? result.candidates.length : 0,
-            responseKeys: Object.keys(result),
-            firstCandidateKeys: result.candidates && result.candidates[0] ? Object.keys(result.candidates[0]) : null,
-            finishReason: result.candidates && result.candidates[0] ? result.candidates[0].finishReason : null,
-            safetyRatings: result.candidates && result.candidates[0] ? result.candidates[0].safetyRatings : null
         });
-        const unsplashResponse = await fetch(`https://api.unsplash.com/search/photos?query=${encodeURIComponent(prompt)}&per_page=3&orientation=landscape&order_by=relevant&client_id=YRtZM4GfSkIrBBbFBFlrDO98J91yjUBEhgxRx1yblA4`);
-        
-        if (unsplashResponse.ok) {
-            const unsplashResult = await unsplashResponse.json();
-            if (unsplashResult.results && unsplashResult.results.length > 0) {
-                const imageUrl = unsplashResult.results[0].urls.regular;
-                return res.status(200).json({
-                    success: true,
-                    data: [{
-                        url: imageUrl,
-                        alt: unsplashResult.results[0].alt_description || prompt
-                    }],
-                    prompt: prompt,
-                    source: 'unsplash_fallback'
-                });
-            }
-        }
-        
-        return res.status(500).json({ 
-            error: 'No images generated by Gemini or Unsplash' 
-        });
-        
+
+        const json = JSON.parse(response.text || "{}");
+        const list = json.attractions || [];
+
+        // Map to internal Attraction interface
+        return list.map((item: any, index: number) => ({
+            id: 9000 + index + Math.floor(Math.random() * 1000), // Random ID to avoid collision
+            name: item.name,
+            type: item.type,
+            category: item.category,
+            icon: item.icon || 'place',
+            description: item.description,
+            coordinates: { top: '50%', left: '50%' }, // Dummy coordinates as we use iframe maps
+            imageUrl: '' // Will be generated separately
+        }));
+
     } catch (error) {
-        console.error('Server error:', error);
-        res.status(500).json({ 
-            error: `Server error: ${error.message}`,
-            stack: error.stack,
-            name: error.name
+        console.error("Dynamic Attraction Gen Error:", error);
+        return [];
+    }
+}
+
+export const chatWithConcierge = async (
+    message: string, 
+    history: {role: string, parts: {text: string}[]}[],
+    context: string
+) => {
+    if (!apiKey) return "System offline.";
+
+    try {
+        const chat = getClient().chats.create({
+            model: 'gemini-3-flash-preview',
+            history: history,
+            config: {
+                systemInstruction: `You are a helpful, sophisticated hotel concierge at ${context}. Keep answers brief (under 50 words) and helpful.`
+            }
         });
+
+        const result = await chat.sendMessage({ message });
+        return result.text;
+    } catch (error) {
+        console.error("Chat Error", error);
+        return "I am having trouble connecting to the concierge network.";
+    }
+}
+
+export const generateItinerary = async (
+    booking: Booking,
+    style: TravelStyle
+): Promise<string> => {
+    if (!apiKey) return "Itinerary generation offline.";
+
+    try {
+        const prompt = `
+            Create a brief, daily itinerary for a trip to ${booking.location}.
+            Traveler Style: ${style}.
+            Dates: ${booking.checkInDate} to ${booking.checkOutDate}.
+            Format: Markdown, bullet points.
+            Focus: Provide a "Theme of the Day" and 2 key activities per day.
+            Keep it concise and exciting.
+        `;
+
+        const response = await getClient().models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: prompt,
+        });
+
+        return response.text || "Could not generate itinerary.";
+    } catch (error) {
+        return "Itinerary service momentarily unavailable.";
     }
 }
